@@ -1,0 +1,1526 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Небесный пилот</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Макет: полноэкранная 3D-сцена, поверх неё приборная панель (canvas) и стеклянные панели в стиле авионики */
+  :root {
+    --ground: #0c1a24;                    /* фон до загрузки сцены */
+    --glass: rgba(8, 20, 30, 0.74);       /* стекло панелей */
+    --rule: rgba(160, 205, 225, 0.22);    /* тонкие линии */
+    --ink: #e8f1f4;                       /* основной текст */
+    --muted: #9fb6c2;                     /* вторичный текст */
+    --amber: #ffb547;                     /* авиационный янтарь: акцент */
+    --alert: #ff5b4f;                     /* предупреждения */
+    --ok: #6fe3a0;                        /* норма */
+    --font-d: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+    --font-b: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --font-m: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--ground); color: var(--ink); font-family: var(--font-b); }
+  #game, #hud { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #hud { pointer-events: none; }
+  .panel {
+    position: fixed; background: var(--glass); border: 1px solid var(--rule); border-radius: 10px;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    padding: 12px 14px; font-size: 13px; line-height: 1.45; pointer-events: none;
+  }
+  .eyebrow { font-family: var(--font-d); font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--amber); margin-bottom: 4px; }
+  #mission { top: calc(12px + env(safe-area-inset-top, 0px)); left: max(12px, env(safe-area-inset-left, 0px)); max-width: min(340px, calc(100vw - 32px)); }
+  #missionText { font-size: 14px; }
+  #missionNav { margin-top: 6px; font-family: var(--font-m); font-size: 12px; color: var(--muted); }
+  #help { top: calc(12px + env(safe-area-inset-top, 0px)); right: max(12px, env(safe-area-inset-right, 0px)); width: 230px; }
+  #help dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
+  #help dt { font-family: var(--font-m); color: var(--amber); white-space: nowrap; }
+  #help dd { margin: 0; color: var(--ink); }
+  #help .warn { margin-top: 8px; color: var(--muted); font-size: 11.5px; }
+  #toast {
+    position: fixed; left: 50%; top: 22%; transform: translateX(-50%);
+    font-family: var(--font-d); font-weight: 600; font-size: 20px; letter-spacing: 0.04em;
+    background: var(--glass); border: 1px solid var(--rule); border-radius: 10px; padding: 10px 18px;
+    pointer-events: none; transition: opacity 0.3s; opacity: 0; text-align: center; max-width: calc(100vw - 32px);
+  }
+  #toast.show { opacity: 1; }
+
+  .overlay {
+    position: fixed; inset: 0; display: grid; place-items: center;
+    background: linear-gradient(180deg, rgba(6, 16, 24, 0.15), rgba(6, 16, 24, 0.7));
+    padding-block: 24px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    overflow-y: auto;
+  }
+  .card {
+    width: 100%; max-width: 560px; background: var(--glass); border: 1px solid var(--rule); border-radius: 14px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); padding: 26px 26px 22px; box-sizing: border-box;
+  }
+  .card h1 { font-family: var(--font-d); font-weight: 700; font-size: clamp(30px, 6vw, 44px); line-height: 1; margin: 0 0 6px; letter-spacing: 0.01em; text-wrap: balance; }
+  .card h2 { font-family: var(--font-d); font-weight: 700; font-size: 30px; margin: 0 0 4px; }
+  .card p { margin: 0 0 16px; color: var(--muted); max-width: 60ch; }
+  .callsign { font-family: var(--font-m); font-size: 12px; color: var(--amber); letter-spacing: 0.08em; margin-bottom: 12px; }
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 18px 0 16px; }
+  @media (max-width: 520px) { .modes { grid-template-columns: 1fr; } #help { display: none; } }
+  .mode {
+    text-align: left; background: rgba(255, 255, 255, 0.04); color: var(--ink); border: 1px solid var(--rule); border-radius: 10px;
+    padding: 14px; cursor: pointer; font: inherit; transition: border-color 0.15s, background 0.15s;
+  }
+  .mode:hover { border-color: var(--amber); background: rgba(255, 181, 71, 0.08); }
+  .mode:focus-visible, .btn:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  .mode b { display: block; font-family: var(--font-d); font-size: 18px; margin-bottom: 4px; }
+  .mode span { color: var(--muted); font-size: 13px; }
+  .keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 16px; font-size: 12.5px; color: var(--muted); }
+  .keys kbd { font-family: var(--font-m); color: var(--ink); background: rgba(255,255,255,0.07); border: 1px solid var(--rule); border-radius: 4px; padding: 0 5px; margin-right: 4px; }
+  .note { margin-top: 12px; font-size: 12px; color: var(--muted); }
+  .score { display: flex; align-items: baseline; gap: 12px; margin: 6px 0 14px; }
+  .score .num { font-family: var(--font-d); font-weight: 700; font-size: 64px; line-height: 1; color: var(--amber); font-variant-numeric: tabular-nums; }
+  .score .grade { font-family: var(--font-d); font-size: 22px; }
+  table.rep { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 18px; }
+  table.rep td { padding: 6px 0; border-bottom: 1px solid var(--rule); }
+  table.rep td:last-child { text-align: right; font-family: var(--font-m); font-variant-numeric: tabular-nums; }
+  .good { color: var(--ok); } .bad { color: var(--alert); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn { font: 600 14px var(--font-b); color: #1b1203; background: var(--amber); border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer; }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--rule); }
+
+  /* STEAM-жоба внутри игры */
+  .mode.wide { grid-column: 1 / -1; border-color: rgba(255, 181, 71, 0.45); }
+  .proj { max-width: 1060px; padding: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr); height: min(88vh, 920px); overflow: hidden; }
+  .proj-nav { display: flex; flex-direction: column; gap: 2px; padding: 22px 14px; border-right: 1px solid var(--rule); overflow-y: auto; }
+  .proj-nav > button { text-align: left; background: none; border: 0; color: var(--muted); font: 500 14px var(--font-b); padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+  .proj-nav > button:hover, .proj-nav > button.on { color: var(--ink); background: rgba(255,255,255,0.06); }
+  .proj-nav > button:focus-visible { outline: 2px solid var(--amber); }
+  .nav-actions { margin-top: auto; padding-top: 16px; display: grid; gap: 8px; }
+  .proj-body { overflow-y: auto; padding: 28px 34px 40px; line-height: 1.6; font-size: 15px; outline: none; }
+  .proj-body section { padding-bottom: 30px; margin-bottom: 30px; border-bottom: 1px solid var(--rule); }
+  .proj-body section:last-child { border-bottom: 0; }
+  .proj-body p, .proj-body li { max-width: 68ch; }
+  .proj-body h2 { font-family: var(--font-d); font-size: clamp(30px, 5vw, 42px); margin: 2px 0 10px; line-height: 1.05; }
+  .proj-body h3 { font-family: var(--font-d); font-size: 26px; margin: 0 0 10px; color: var(--ink); }
+  .proj-body h4 { font-family: var(--font-d); font-size: 18px; margin: 22px 0 6px; color: var(--amber); }
+  .proj-body p { color: #cddbe2; margin: 0 0 12px; }
+  .lead { font-size: 17px; color: var(--ink) !important; }
+  .facts { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px 18px; margin: 18px 0 0; }
+  .facts dt { font-family: var(--font-d); font-weight: 600; color: var(--amber); }
+  .facts dd { margin: 0; color: #cddbe2; }
+  .facts ol, .proj-body ol { margin: 0; padding-left: 20px; }
+  .steam { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 12px; }
+  .steam > div { border: 1px solid var(--rule); border-radius: 10px; padding: 12px; background: rgba(255,255,255,0.03); }
+  .steam b { font-family: var(--font-d); font-size: 34px; color: var(--amber); line-height: 1; }
+  .steam span { display: block; font-family: var(--font-m); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 4px 0 6px; }
+  .steam p { font-size: 13.5px; margin: 0; }
+  .timeline { list-style: none; padding: 0 !important; border-left: 2px solid rgba(255,181,71,0.5); margin-left: 6px !important; }
+  .timeline li { position: relative; padding: 0 0 12px 18px; display: grid; grid-template-columns: 96px minmax(0,1fr); gap: 10px; }
+  .timeline li::before { content: ""; position: absolute; left: -6px; top: 8px; width: 10px; height: 10px; border-radius: 50%; background: var(--amber); }
+  .timeline time { font-family: var(--font-m); font-size: 13px; color: var(--amber); padding-top: 2px; }
+  .timeline span { color: #cddbe2; }
+  .fig { margin: 16px 0; padding: 12px; border: 1px solid var(--rule); border-radius: 10px; background: rgba(0,0,0,0.18); }
+  .fig svg { width: 100%; height: auto; display: block; font-family: var(--font-b); }
+  .fig figcaption { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .data { width: 100%; border-collapse: collapse; font-size: 14px; margin: 12px 0; }
+  .data th { text-align: left; font-family: var(--font-d); font-weight: 600; color: var(--amber); border-bottom: 1px solid var(--rule); padding: 6px 8px 6px 0; }
+  .data td { border-bottom: 1px solid var(--rule); padding: 7px 8px 7px 0; color: #cddbe2; vertical-align: top; }
+  .formula { font-family: var(--font-m); font-size: 17px; color: var(--ink); background: rgba(255,181,71,0.08); border-left: 3px solid var(--amber); padding: 10px 14px; margin: 10px 0; border-radius: 0 8px 8px 0; overflow-x: auto; }
+  .example, .note-box, .exp { border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; margin: 14px 0; background: rgba(255,255,255,0.03); color: #cddbe2; }
+  .exp h4 { margin-top: 0; }
+  .exp p { margin-bottom: 6px; }
+  .exp.sim { border-color: rgba(255,181,71,0.5); }
+  .stages li, .slides li, .src li { margin-bottom: 8px; color: #cddbe2; }
+  .src a { color: var(--amber); }
+  .muted-s { font-size: 12.5px; color: var(--muted) !important; }
+  @media (max-width: 760px) {
+    .proj { grid-template-columns: 1fr; height: auto; overflow: visible; }
+    .proj-nav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--rule); padding: 14px; }
+    .proj-nav .callsign { width: 100%; }
+    .nav-actions { margin-top: 8px; grid-auto-flow: column; width: 100%; }
+    .proj-body { overflow: visible; padding: 20px 18px 30px; }
+    .facts { grid-template-columns: 1fr; gap: 2px; }
+    .facts dd { margin-bottom: 10px; }
+    .timeline li { grid-template-columns: 1fr; gap: 0; }
+    .data { display: block; overflow-x: auto; }
+  }
+  #lab { left: max(12px, env(safe-area-inset-left, 0px)); top: 50%; transform: translateY(-50%); width: 228px; }
+  #lab dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 6px 0 0; font-family: var(--font-m); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  #lab dt { color: var(--muted); }
+  #lab dd { margin: 0; text-align: right; color: var(--ink); }
+  #lab dt i { font-style: normal; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+  .lab-note { margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { #toast { transition: none; } }
+</style>
+</head>
+<body>
+
+<canvas id="game" aria-label="Трёхмерная сцена полёта"></canvas>
+<canvas id="hud" aria-hidden="true"></canvas>
+
+<div id="mission" class="panel" hidden>
+  <div class="eyebrow" id="missionTitle">Задание</div>
+  <div id="missionText"></div>
+  <div id="missionNav"></div>
+</div>
+
+<div id="help" class="panel" hidden>
+  <div class="eyebrow">Управление · H скрыть</div>
+  <dl>
+    <dt>W / S</dt><dd>нос вверх / вниз</dd>
+    <dt>A / D</dt><dd>крен влево / вправо</dd>
+    <dt>Q / E</dt><dd>рысканье, руление</dd>
+    <dt>Shift</dt><dd>прибавить газ (или +)</dd>
+    <dt>Ctrl</dt><dd>убрать газ (или −)</dd>
+    <dt>F</dt><dd>закрылки 0 / 1 / 2</dd>
+    <dt>Пробел</dt><dd>тормоза</dd>
+    <dt>C</dt><dd>камера: снаружи / кабина</dd>
+    <dt>R · Esc</dt><dd>заново · меню</dd>
+    <dt>M</dt><dd>звук мотора</dd>
+    <dt>V · L</dt><dd>векторы сил · лаборатория</dd>
+  </dl>
+  <div class="warn">Не жмите Ctrl вместе с W: браузер закроет вкладку. Для газа удобнее + и −.</div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div id="menu" class="overlay">
+  <div class="card">
+    <div class="callsign">RA-1957 · АЭРОДРОМ «ВОСХОД» · ВПП 36/18</div>
+    <h1>Небесный пилот</h1>
+    <p>Лёгкий четырёхместный самолёт, полоса 1200 м среди холмов и гор. Подъёмная сила зависит от скорости и угла атаки: если слишком медленно задрать нос, самолёт свалится.</p>
+    <div class="modes">
+      <button class="mode" id="btnFree" type="button"><b>Свободный полёт</b><span>Старт в воздухе на 450 м, летайте над горами и облаками.</span></button>
+      <button class="mode" id="btnMission" type="button"><b>Взлёт и посадка</b><span>Взлетите с полосы, сделайте круг и посадите самолёт. Посадку оценят по 100-балльной шкале.</span></button>
+      <button class="mode wide" id="btnProject" type="button"><b>STEAM-жоба «Как летает самолёт»</b><span>Исследовательский проект: физика полёта, история, устройство самолёта, опыты, выводы и план презентации. С проверкой в симуляторе.</span></button>
+    </div>
+    <div class="keys">
+      <div><kbd>W</kbd><kbd>S</kbd> тангаж</div>
+      <div><kbd>A</kbd><kbd>D</kbd> крен</div>
+      <div><kbd>Q</kbd><kbd>E</kbd> рысканье</div>
+      <div><kbd>Shift</kbd><kbd>Ctrl</kbd> газ</div>
+      <div><kbd>F</kbd> закрылки</div>
+      <div><kbd>Пробел</kbd> тормоз</div>
+      <div><kbd>C</kbd> камера</div>
+      <div><kbd>R</kbd> заново</div>
+    </div>
+    <div class="note">Нужна клавиатура. Мышью можно вращать внешнюю камеру.</div>
+  </div>
+</div>
+
+<div id="project" class="overlay" hidden>
+  <div class="card proj" role="dialog" aria-labelledby="projTitle">
+    <nav class="proj-nav" aria-label="Разделы проекта">
+      <div class="callsign">STEAM-ЖОБА · 3 КУРС</div>
+      <button type="button" data-go="p-intro">Введение</button>
+      <button type="button" data-go="p-steam">STEAM-подход</button>
+      <button type="button" data-go="p-history">История авиации</button>
+      <button type="button" data-go="p-physics">Физика полёта</button>
+      <button type="button" data-go="p-design">Устройство самолёта</button>
+      <button type="button" data-go="p-stages">Этапы полёта</button>
+      <button type="button" data-go="p-lab">Практическая часть</button>
+      <button type="button" data-go="p-end">Заключение</button>
+      <button type="button" data-go="p-slides">План презентации</button>
+      <button type="button" data-go="p-src">Источники</button>
+      <div class="nav-actions">
+        <button class="btn" id="btnLabFly" type="button">Проверить в полёте</button>
+        <button class="btn ghost" id="btnProjBack" type="button">Назад в меню</button>
+      </div>
+    </nav>
+    <article class="proj-body" id="projBody" tabindex="-1">
+      <section id="p-intro">
+        <div class="eyebrow">Исследовательский проект</div>
+        <h2 id="projTitle">Как летает самолёт</h2>
+        <p class="lead">Самолёт массой в сотни тонн держится в воздухе благодаря четырём силам и форме крыла. В проекте мы разбираем, как они работают, проверяем это опытами и собственным 3D-симулятором «Небесный пилот», в котором заложены те же формулы.</p>
+        <dl class="facts">
+          <dt>Актуальность</dt><dd>В мире каждый день выполняется более 100 000 рейсов. Понимание аэродинамики нужно будущему инженеру и снимает страх перед перелётами; компьютерное моделирование — основной инструмент современного авиастроения.</dd>
+          <dt>Цель</dt><dd>Выяснить, какие силы позволяют самолёту летать, и подтвердить это опытами и численной моделью.</dd>
+          <dt>Задачи</dt><dd><ol><li>Изучить историю авиации.</li><li>Разобрать четыре силы, закон Бернулли, третий закон Ньютона и роль угла атаки.</li><li>Изучить устройство самолёта и этапы полёта.</li><li>Провести три физических опыта и виртуальный эксперимент в симуляторе.</li><li>Сравнить измерения с расчётом и сделать выводы.</li></ol></dd>
+          <dt>Гипотеза</dt><dd>Подъёмная сила возникает из-за формы крыла и угла, под которым оно встречает поток; она растёт пропорционально квадрату скорости и резко падает после критического угла атаки (около 15°).</dd>
+          <dt>Объект</dt><dd>Самолёт.</dd>
+          <dt>Предмет</dt><dd>Аэродинамические силы, действующие на самолёт в полёте.</dd>
+          <dt>Методы</dt><dd>Анализ литературы, эксперимент, математическое и компьютерное моделирование.</dd>
+        </dl>
+      </section>
+
+      <section id="p-steam">
+        <h3>STEAM-подход</h3>
+        <p>Проект объединяет пять направлений: каждое отвечает за свою часть работы.</p>
+        <div class="steam">
+          <div><b>S</b><span>Science</span><p>Физика: законы Ньютона, уравнение Бернулли, подъёмная сила и сопротивление.</p></div>
+          <div><b>T</b><span>Technology</span><p>Браузерный 3D-симулятор на JavaScript и Three.js, физика считается 120 раз в секунду.</p></div>
+          <div><b>E</b><span>Engineering</span><p>Устройство самолёта: крыло с профилем NACA 2412, оперение, рули, шасси, закрылки.</p></div>
+          <div><b>A</b><span>Art</span><p>3D-модель самолёта, аэродром, рельеф, облака и дизайн приборной панели.</p></div>
+          <div><b>M</b><span>Mathematics</span><p>Формулы сил, расчёт скорости сваливания, векторы, кватернионы для поворотов.</p></div>
+        </div>
+      </section>
+
+      <section id="p-history">
+        <h3>История авиации</h3>
+        <p>Управляемый полёт аппарата тяжелее воздуха существует только с 1903 года. Ключевым оказался не мощный мотор, а управление самолётом по трём осям.</p>
+        <ol class="timeline">
+          <li><time>ок. 1485</time><span>Леонардо да Винчи рисует орнитоптер и прообраз парашюта.</span></li>
+          <li><time>1783</time><span>Братья Монгольфье поднимают людей на воздушном шаре: первый полёт человека, но на аппарате легче воздуха.</span></li>
+          <li><time>1799–1853</time><span>Джордж Кейли разделяет функции крыла, хвоста и двигателя — схема современного самолёта.</span></li>
+          <li><time>1881–1885</time><span>Александр Можайский строит самолёт с паровыми двигателями — первая в России попытка взлёта.</span></li>
+          <li><time>1891–1896</time><span>Отто Лилиенталь совершает более 2000 полётов на планерах и изучает профиль крыла.</span></li>
+          <li><time>17.12.1903</time><span>Братья Райт, «Флайер-1»: 12 секунд, 36 м. Первый управляемый моторный полёт.</span></li>
+          <li><time>1906</time><span>Николай Жуковский выводит формулу подъёмной силы через циркуляцию — основа теории крыла.</span></li>
+          <li><time>1913</time><span>Игорь Сикорский, «Русский витязь» — первый четырёхмоторный самолёт.</span></li>
+          <li><time>1939</time><span>Heinkel He 178 — первый полёт на турбореактивном двигателе.</span></li>
+          <li><time>1947</time><span>Bell X-1 преодолевает скорость звука.</span></li>
+          <li><time>1952–1956</time><span>De Havilland Comet и Ту-104 — первые реактивные пассажирские лайнеры.</span></li>
+          <li><time>1969</time><span>Первые полёты Boeing 747 и сверхзвукового Concorde.</span></li>
+          <li><time>2005</time><span>Airbus A380 — крупнейший пассажирский самолёт, размах крыла 79,8 м.</span></li>
+          <li><time>2010-е</time><span>Boeing 787 и Airbus A350: около половины конструкции из композитов, расход топлива ниже на 20–25%.</span></li>
+        </ol>
+      </section>
+
+      <section id="p-physics">
+        <h3>Физика полёта</h3>
+        <p>В горизонтальном полёте с постоянной скоростью четыре силы уравновешены попарно: подъёмная сила равна весу, тяга равна сопротивлению. Нарушение равновесия по второму закону Ньютона даёт ускорение: самолёт разгоняется, тормозит, набирает или теряет высоту.</p>
+        <figure class="fig">
+          <svg viewBox="0 0 560 270" role="img" aria-label="Четыре силы, действующие на самолёт">
+            <defs>
+              <marker id="ah-g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#6fe3a0"/></marker>
+              <marker id="ah-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#ff5b4f"/></marker>
+              <marker id="ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#ffb547"/></marker>
+              <marker id="ah-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5cc8ff"/></marker>
+            </defs>
+            <path d="M150 140 Q160 122 200 120 L360 116 Q392 114 410 124 L418 134 Q404 148 360 150 L210 152 Q168 152 150 140 Z" fill="#e8f1f4" stroke="#9fb6c2"/>
+            <path d="M178 122 L160 86 L182 86 L214 120 Z" fill="#ff5b4f"/>
+            <path d="M246 118 L320 112 L328 118 L252 124 Z" fill="#c9d5db"/>
+            <circle cx="290" cy="134" r="4" fill="#1b2a35"/>
+            <line x1="290" y1="128" x2="290" y2="34" stroke="#6fe3a0" stroke-width="4" marker-end="url(#ah-g)"/>
+            <line x1="290" y1="140" x2="290" y2="236" stroke="#ff5b4f" stroke-width="4" marker-end="url(#ah-r)"/>
+            <line x1="418" y1="134" x2="520" y2="134" stroke="#ffb547" stroke-width="4" marker-end="url(#ah-a)"/>
+            <line x1="152" y1="140" x2="50" y2="140" stroke="#5cc8ff" stroke-width="4" marker-end="url(#ah-c)"/>
+            <text x="302" y="44" fill="#6fe3a0" font-size="15" font-weight="600">Подъёмная сила Y</text>
+            <text x="302" y="236" fill="#ff5b4f" font-size="15" font-weight="600">Сила тяжести G = mg</text>
+            <text x="440" y="122" fill="#ffb547" font-size="15" font-weight="600">Тяга P</text>
+            <text x="30" y="166" fill="#5cc8ff" font-size="15" font-weight="600">Сопротивление X</text>
+          </svg>
+          <figcaption>Четыре силы в горизонтальном полёте: Y = G, P = X. В симуляторе их можно включить клавишей V.</figcaption>
+        </figure>
+        <table class="data">
+          <thead><tr><th>Сила</th><th>Откуда берётся</th><th>Пример из жизни</th></tr></thead>
+          <tbody>
+            <tr><td>Подъёмная сила Y</td><td>Крыло отклоняет поток вниз и создаёт разность давлений</td><td>Ладонь за окном машины сама уходит вверх</td></tr>
+            <tr><td>Сила тяжести G</td><td>Притяжение Земли, приложено к центру масс</td><td>Брошенный мяч падает</td></tr>
+            <tr><td>Тяга P</td><td>Винт или двигатель отбрасывает воздух назад</td><td>Отпущенный надутый шарик улетает</td></tr>
+            <tr><td>Сопротивление X</td><td>Трение воздуха и завихрения за самолётом</td><td>Велосипедисту тяжело ехать против ветра</td></tr>
+          </tbody>
+        </table>
+        <h4>Формула подъёмной силы</h4>
+        <div class="formula">Y = C<sub>y</sub> · ρv²/2 · S</div>
+        <p>ρ — плотность воздуха (1,225 кг/м³ у земли), v — скорость, S — площадь крыла, C<sub>y</sub> — коэффициент подъёмной силы, зависящий от профиля и угла атаки. Сила растёт как квадрат скорости: вдвое быстрее — вчетверо больше подъёмной силы. Сопротивление считается так же, с коэффициентом C<sub>x</sub>, а отношение K = Y/X называют аэродинамическим качеством.</p>
+        <div class="example"><b>Расчёт для самолёта из симулятора.</b> m = 1100 кг, S = 16,2 м², C<sub>y max</sub> ≈ 1,55. Из условия Y = G минимальная скорость горизонтального полёта:
+          <div class="formula">v<sub>min</sub> = √(2mg / ρSC<sub>y max</sub>) = √(2·1100·9,81 / (1,225·16,2·1,55)) ≈ 26,6 м/с ≈ 96 км/ч</div>
+          С выпущенными закрылками (C<sub>y max</sub> ≈ 2,0) получается около 84 км/ч — поэтому на посадке закрылки выпускают.</div>
+        <h4>Закон Бернулли</h4>
+        <div class="formula">p + ρv²/2 = const</div>
+        <p>Где поток быстрее, там давление ниже. Над выпуклой верхней поверхностью крыла воздух течёт быстрее, давление там меньше, и крыло «выталкивается» вверх. Пример: если подуть между двумя висящими листами бумаги, они сойдутся, а не разлетятся.</p>
+        <p class="note-box"><b>Частая ошибка.</b> Утверждение, что частицы сверху и снизу «должны встретиться» у задней кромки, неверно: в аэродинамических трубах верхний поток приходит раньше. Ускорение объясняется циркуляцией воздуха вокруг крыла (теорема Жуковского), а не «разной длиной пути».</p>
+        <h4>Третий закон Ньютона</h4>
+        <p>Крыло отбрасывает массу воздуха вниз (скос потока), а воздух с равной силой толкает крыло вверх. Объяснения через Бернулли и через Ньютона не спорят: это два описания одного явления. Тот же закон даёт тягу: винт отбрасывает воздух назад — самолёт движется вперёд. Пример: лодка отплывает назад, когда человек прыгает из неё на берег.</p>
+        <h4>Угол атаки и сваливание</h4>
+        <p>Угол атаки α — угол между хордой крыла и набегающим потоком. До критического угла (около 15°) C<sub>y</sub> растёт почти линейно, затем поток срывается с верхней поверхности, подъёмная сила резко падает — это сваливание. Чтобы вывести самолёт, пилот отдаёт штурвал от себя и уменьшает угол атаки.</p>
+        <figure class="fig">
+          <svg viewBox="0 0 560 250" role="img" aria-label="Зависимость коэффициента подъёмной силы от угла атаки">
+            <line x1="60" y1="200" x2="530" y2="200" stroke="#9fb6c2"/>
+            <line x1="60" y1="20" x2="60" y2="215" stroke="#9fb6c2"/>
+            <g fill="#9fb6c2" font-size="12" font-family="IBM Plex Mono, monospace" text-anchor="middle">
+              <text x="60" y="218">0°</text><text x="160" y="218">5°</text><text x="260" y="218">10°</text><text x="360" y="218">15°</text><text x="460" y="218">20°</text>
+              <text x="500" y="238">угол атаки α</text>
+              <text x="44" y="204" text-anchor="end">0</text><text x="44" y="144" text-anchor="end">0,5</text><text x="44" y="84" text-anchor="end">1,0</text><text x="44" y="24" text-anchor="end">1,5</text>
+            </g>
+            <g stroke="rgba(160,205,225,0.15)"><line x1="60" y1="140" x2="530" y2="140"/><line x1="60" y1="80" x2="530" y2="80"/><line x1="60" y1="20" x2="530" y2="20"/></g>
+            <polyline points="60,170 160,118 260,66 357,15 400,40 460,105 520,120" fill="none" stroke="#ffb547" stroke-width="3"/>
+            <line x1="357" y1="15" x2="357" y2="200" stroke="#ff5b4f" stroke-dasharray="4 4"/>
+            <text x="368" y="32" fill="#ff5b4f" font-size="13" font-weight="600">срыв потока, α ≈ 15°</text>
+            <text x="120" y="96" fill="#e8f1f4" font-size="13">C<tspan baseline-shift="sub" font-size="10">y</tspan> растёт линейно</text>
+          </svg>
+          <figcaption>C<sub>y</sub>(α) по модели симулятора: C<sub>y</sub> = 0,25 + 5·α (α в радианах) до 15°, затем падение.</figcaption>
+        </figure>
+      </section>
+
+      <section id="p-design">
+        <h3>Устройство самолёта</h3>
+        <p>Каждая часть отвечает за одну из сил или за управление по одной из трёх осей: тангаж (нос вверх-вниз), крен (наклон крыльев), рысканье (нос влево-вправо). Все эти детали есть у 3D-модели в симуляторе, а рули на ней отклоняются вместе с клавишами.</p>
+        <table class="data">
+          <thead><tr><th>Часть</th><th>Задача</th><th>В симуляторе</th></tr></thead>
+          <tbody>
+            <tr><td>Крыло</td><td>Создаёт подъёмную силу. Профиль выпуклый сверху</td><td>Верхнее крыло, профиль NACA 2412, размах 10,9 м</td></tr>
+            <tr><td>Фюзеляж</td><td>Корпус: кабина, груз, крепление крыла и оперения</td><td>Тело вращения длиной 6,8 м</td></tr>
+            <tr><td>Хвостовое оперение</td><td>Стабилизатор и киль делают полёт устойчивым, как оперение стрелы</td><td>Красный киль и горизонтальный стабилизатор</td></tr>
+            <tr><td>Двигатель с винтом</td><td>Создаёт тягу</td><td>Поршневой мотор, тяга до 4,2 кН · Shift / Ctrl</td></tr>
+            <tr><td>Закрылки</td><td>Увеличивают C<sub>y</sub> и сопротивление для медленного полёта на взлёте и посадке</td><td>Клавиша F: 0 / 1 / 2</td></tr>
+            <tr><td>Элероны</td><td>Отклоняются в разные стороны и наклоняют самолёт — крен</td><td>Клавиши A / D</td></tr>
+            <tr><td>Руль высоты</td><td>Меняет угол атаки — тангаж</td><td>Клавиши W / S</td></tr>
+            <tr><td>Руль направления</td><td>Поворачивает нос влево-вправо — рысканье</td><td>Клавиши Q / E</td></tr>
+            <tr><td>Шасси</td><td>Разбег, посадка, руление</td><td>Трёхопорное, с носовой стойкой; тормоза — пробел</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="p-stages">
+        <h3>Этапы полёта</h3>
+        <ol class="stages">
+          <li><b>Руление.</b> Самолёт едет к полосе на малом газу, нос поворачивают носовым колесом и рулём направления.</li>
+          <li><b>Взлёт.</b> Полный газ, разбег. На скорости отрыва (у нашего самолёта 100–110 км/ч) пилот берёт штурвал на себя: угол атаки растёт, Y становится больше G.</li>
+          <li><b>Набор высоты.</b> Тяга больше сопротивления, избыток мощности уходит на подъём. Закрылки убирают.</li>
+          <li><b>Крейсерский полёт.</b> Y = G и P = X, скорость и высота постоянны. Двигатель работает в экономичном режиме.</li>
+          <li><b>Снижение.</b> Газ уменьшают, самолёт идёт по глиссаде около 3°. Огни PAPI: 2 белых + 2 красных — на глиссаде.</li>
+          <li><b>Посадка.</b> Закрылки выпущены, над полосой пилот «выравнивает» самолёт и касается полосы основными колёсами со снижением 1–2 м/с, затем тормозит.</li>
+        </ol>
+        <p class="note-box">Режим «Взлёт и посадка» в симуляторе повторяет этапы 2–6 и оценивает посадку по вертикальной скорости, крену, отклонению от оси и месту касания.</p>
+      </section>
+
+      <section id="p-lab">
+        <h3>Практическая часть</h3>
+        <div class="exp">
+          <h4>Опыт 1. Полоска бумаги и закон Бернулли</h4>
+          <p><b>Материалы:</b> полоска бумаги 4 × 20 см.</p>
+          <p><b>Ход работы:</b> прижмите край полоски к нижней губе так, чтобы она свисала вниз. Сильно подуйте горизонтально над полоской.</p>
+          <p><b>Ожидаемый результат:</b> полоска поднимается и выпрямляется.</p>
+          <p><b>Вывод:</b> над полоской поток быстрее, давление ниже, поэтому снизу её толкает вверх — так же работает верхняя поверхность крыла.</p>
+        </div>
+        <div class="exp">
+          <h4>Опыт 2. Бумажные самолётики разной формы</h4>
+          <p><b>Материалы:</b> листы A4 одной плотности, рулетка, скотч.</p>
+          <p><b>Ход работы:</b> сложите три модели: «стрелу» (узкое треугольное крыло), «планер» (широкое прямое крыло) и «планер» с отогнутыми вверх на 3 мм задними кромками (руль высоты). Запустите каждую 5 раз с одной высоты и одинаковым усилием, запишите дальность и время полёта, посчитайте среднее.</p>
+          <p><b>Ожидаемый результат:</b> «стрела» летит быстрее, но короче по времени; широкое крыло дольше планирует; отогнутые кромки поднимают нос и меняют траекторию.</p>
+          <p><b>Вывод:</b> большая площадь крыла даёт больше подъёмной силы при той же скорости (формула Y = C<sub>y</sub>·ρv²/2·S), а руль высоты управляет углом атаки.</p>
+        </div>
+        <div class="exp">
+          <h4>Опыт 3. Модель крыла на весах</h4>
+          <p><b>Материалы:</b> кухонные весы с точностью 1 г, фен, плотная бумага или картон, скотч, транспортир, пластилин.</p>
+          <p><b>Ход работы:</b> согните из бумаги профиль крыла (плоский низ, выпуклый верх, хорда 10 см) и закрепите его на пластилине на весах. Обнулите весы. Направьте поток фена на переднюю кромку с расстояния 30 см и снимайте показания для углов атаки 0°, 5°, 10°, 15°, 20°, 25°.</p>
+          <p><b>Ожидаемый результат:</b> показания весов уменьшаются (крыло «легчает») с ростом угла до 10–15°, а затем уменьшение прекращается — начинается срыв потока.</p>
+          <p><b>Вывод:</b> подъёмная сила растёт с углом атаки до критического значения, после чего падает. Постройте график и сравните его с графиком C<sub>y</sub>(α) выше.</p>
+        </div>
+        <div class="exp sim">
+          <h4>Виртуальный эксперимент в симуляторе</h4>
+          <p><b>Задача:</b> измерить скорость сваливания и сравнить с расчётом v<sub>min</sub> ≈ 96 км/ч.</p>
+          <p><b>Ход работы:</b> нажмите «Проверить в полёте». На высоте 450 м уберите газ (Ctrl или −) и плавно тяните W, удерживая высоту. Запишите скорость, при которой появится «СВАЛИВАНИЕ». Повторите с закрылками 2 (клавиша F).</p>
+          <p><b>Что смотреть:</b> панель «Лаборатория» (клавиша L) показывает α, C<sub>y</sub>, все четыре силы и расчётную v<sub>min</sub>; клавиша V рисует векторы сил прямо на самолёте.</p>
+        </div>
+        <table class="data">
+          <thead><tr><th>Измерение</th><th>Расчёт</th><th>Симулятор</th><th>Расхождение</th></tr></thead>
+          <tbody>
+            <tr><td>v<sub>min</sub>, закрылки 0</td><td>96 км/ч</td><td>впишите</td><td>впишите</td></tr>
+            <tr><td>v<sub>min</sub>, закрылки 2</td><td>84 км/ч</td><td>впишите</td><td>впишите</td></tr>
+            <tr><td>Критический угол атаки</td><td>15°</td><td>впишите</td><td>впишите</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="p-end">
+        <h3>Заключение</h3>
+        <p>Гипотеза подтвердилась. Подъёмная сила создаётся крылом благодаря его профилю и углу атаки: опыт с полоской показал разность давлений по Бернулли, опыт с весами — рост подъёмной силы с углом атаки и срыв потока после 10–15°. Бумажные модели показали, что площадь крыла и руль высоты меняют траекторию полёта.</p>
+        <p>Симулятор, построенный на тех же формулах, воспроизводит взлёт на 100–110 км/ч, сваливание на малой скорости и снижение скорости сваливания при выпуске закрылков. Это показывает, что четыре силы и формула Y = C<sub>y</sub>·ρv²/2·S достаточно хорошо описывают полёт лёгкого самолёта.</p>
+        <p><b>Выводы:</b></p>
+        <ol><li>Самолёт летит, пока подъёмная сила уравновешивает вес, а тяга — сопротивление.</li><li>Объяснения через Бернулли и через третий закон Ньютона описывают одно и то же явление.</li><li>Угол атаки — главный параметр, которым пилот управляет подъёмной силой; превышать критический угол нельзя.</li><li>Компьютерное моделирование позволяет безопасно проверить опасные режимы, например сваливание.</li></ol>
+      </section>
+
+      <section id="p-slides">
+        <h3>План презентации · 12 слайдов</h3>
+        <ol class="slides">
+          <li><b>Титул.</b> Тема, автор, руководитель; фон — скриншот симулятора над облаками.</li>
+          <li><b>Актуальность, цель, гипотеза.</b> Три коротких блока.</li>
+          <li><b>STEAM-подход.</b> Пять букв S-T-E-A-M и вклад каждой.</li>
+          <li><b>История.</b> Лента времени 1485–2010-е с силуэтами аппаратов.</li>
+          <li><b>Четыре силы.</b> Схема самолёта с цветными векторами.</li>
+          <li><b>Бернулли и Ньютон.</b> Профиль крыла с линиями тока и скосом потока.</li>
+          <li><b>Угол атаки.</b> График C<sub>y</sub>(α) и три профиля: 0°, 8°, 20° (срыв).</li>
+          <li><b>Устройство самолёта.</b> 3D-модель с подписями частей и осей.</li>
+          <li><b>Этапы полёта.</b> Профиль полёта: взлёт, набор, крейсер, снижение, посадка.</li>
+          <li><b>Опыты.</b> Фото трёх опытов и таблица/график результатов.</li>
+          <li><b>Симулятор.</b> Скриншоты HUD и лаборатории, сравнение v<sub>min</sub>: расчёт и измерение.</li>
+          <li><b>Заключение.</b> Подтверждение гипотезы, выводы, QR-код на симулятор.</li>
+        </ol>
+        <p class="note-box"><b>Идеи иллюстраций:</b> лента времени с силуэтами в одном масштабе (планер Лилиенталя 7 м и A380 79,8 м); дым или нитки в потоке фена над моделью крыла; скриншот с векторами сил (клавиша V); фото весов при разных углах.</p>
+      </section>
+
+      <section id="p-src">
+        <h3>Источники</h3>
+        <ol class="src">
+          <li>Anderson J. D. Introduction to Flight. — McGraw-Hill Education.</li>
+          <li>Kermode A. C. Mechanics of Flight. — Pearson.</li>
+          <li>Мхитарян А. М. Аэродинамика. — М.: Машиностроение, 1976.</li>
+          <li>Жуковский Н. Е. О присоединённых вихрях. — 1906.</li>
+          <li>NASA Glenn Research Center. Beginner's Guide to Aeronautics — <a href="https://www.grc.nasa.gov/www/k-12/airplane/" target="_blank" rel="noopener">grc.nasa.gov/www/k-12/airplane</a></li>
+          <li>Three.js — документация библиотеки 3D-графики — <a href="https://threejs.org/docs/" target="_blank" rel="noopener">threejs.org/docs</a></li>
+          <li>Собственный симулятор «Небесный пилот» — физическая модель и измерения.</li>
+        </ol>
+        <p class="muted-s">Перед сдачей сверьте год и издательство по экземпляру, который будете цитировать.</p>
+      </section>
+    </article>
+  </div>
+</div>
+
+<div id="lab" class="panel" hidden>
+  <div class="eyebrow">Лаборатория · L</div>
+  <dl id="labRows"></dl>
+  <div class="lab-note">V — векторы сил на самолёте</div>
+</div>
+
+<div id="result" class="overlay" hidden>
+  <div class="card">
+    <div class="callsign" id="resEyebrow">ОЦЕНКА ПОСАДКИ</div>
+    <h2 id="resTitle">Посадка</h2>
+    <div class="score"><span class="num" id="resScore">0</span><span class="grade" id="resGrade"></span></div>
+    <table class="rep" id="resTable"></table>
+    <div class="row">
+      <button class="btn" id="btnAgain" type="button">Ещё раз (R)</button>
+      <button class="btn ghost" id="btnMenu" type="button">В меню (Esc)</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* =====================================================================
+   НЕБЕСНЫЙ ПИЛОТ — браузерный 3D-симулятор лёгкого самолёта
+   Архитектура:
+     1. Утилиты и шум          — функции рельефа (fbm), математика
+     2. Мир                    — небо (шейдер), свет, рельеф, вода, ВПП, лес, облака, аэродром
+     3. Модель самолёта        — фюзеляж (Lathe), крылья (лофт профиля NACA 2412), рули
+     4. Физика                 — силы (подъёмная, тяга, сопротивление, тяжесть), вращение, земля
+     5. Ввод                   — клавиатура, плавные оси управления
+     6. Задание                — фазы «взлёт → набор → круг → посадка» и оценка
+     7. Камеры                 — от третьего лица (с вращением мышью) и из кабины
+     8. HUD                    — авиагоризонт, скорость, высота, вариометр, газ, курс
+     9. Главный цикл           — фиксированный шаг физики 120 Гц + отрисовка
+   ===================================================================== */
+
+// ---------- 1. Утилиты ----------
+const $ = s => document.querySelector(s);
+const V3 = THREE.Vector3;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const DEG = 180 / Math.PI;
+
+const RUNWAY = { halfW: 15, halfL: 600 };   // полоса 30 × 1200 м, ось вдоль Z, «север» = −Z
+const WATER = -14;                           // уровень воды
+const PAPI_Z = 320;                          // огни глиссады у южного порога
+
+// Детерминированный шум для рельефа
+function hash(x, z) { const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453; return s - Math.floor(s); }
+function noise(x, z) {
+  const xi = Math.floor(x), zi = Math.floor(z), xf = x - xi, zf = z - zi;
+  const u = xf * xf * (3 - 2 * xf), v = zf * zf * (3 - 2 * zf);
+  const a = hash(xi, zi), b = hash(xi + 1, zi), c = hash(xi, zi + 1), d = hash(xi + 1, zi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm(x, z) { let s = 0, amp = 1, f = 1, n = 0; for (let i = 0; i < 5; i++) { s += noise(x * f, z * f) * amp; n += amp; amp *= 0.5; f *= 2.03; } return s / n; }
+
+// Маска аэродрома: 0 на лётном поле, 1 вдали от него
+function fieldMask(x, z) {
+  const dx = Math.max(0, Math.abs(x + 20) - 110), dz = Math.max(0, Math.abs(z) - 820);
+  return smoothstep(0, 650, Math.hypot(dx, dz));
+}
+// Высота рельефа в точке (м)
+function terrainHeight(x, z) {
+  let h = (fbm(x / 900, z / 900) - 0.45) * 170;                   // холмы
+  const m = fbm(x / 2600 + 50, z / 2600 - 30);                     // горные массивы
+  h += Math.pow(Math.max(0, m - 0.44), 2) * 2900;
+  return h * fieldMask(x, z);                                      // аэродром ровный, на нуле
+}
+// Высота опоры (рельеф или вода)
+const surfaceHeight = (x, z) => Math.max(terrainHeight(x, z), WATER);
+
+// ---------- 2. Мир ----------
+const canvas = $('#game');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const HORIZON = new THREE.Color(0xcfdde6);
+scene.fog = new THREE.Fog(HORIZON, 1600, 9800);
+const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 22000);
+
+// Небо: сфера с вертикальным градиентом и солнцем
+const sunDir = new V3(-0.5, 0.42, -0.75).normalize();
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(16000, 32, 16),
+  new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
+    uniforms: { top: { value: new THREE.Color(0x2a66ad) }, hor: { value: HORIZON }, bot: { value: new THREE.Color(0x9aaeb6) }, sun: { value: sunDir } },
+    vertexShader: `varying vec3 vDir;
+      void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vDir = w.xyz - cameraPosition; gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: `uniform vec3 top; uniform vec3 hor; uniform vec3 bot; uniform vec3 sun; varying vec3 vDir;
+      void main(){
+        vec3 d = normalize(vDir); float h = d.y;
+        vec3 c = h > 0.0 ? mix(hor, top, pow(clamp(h, 0.0, 1.0), 0.5)) : mix(hor, bot, clamp(-h * 5.0, 0.0, 1.0));
+        float s = max(dot(d, sun), 0.0);
+        c += vec3(1.0, 0.9, 0.72) * (pow(s, 900.0) * 2.0 + pow(s, 14.0) * 0.22);
+        gl_FragColor = vec4(c, 1.0);
+      }`
+  })
+);
+sky.renderOrder = -10;
+scene.add(sky);
+
+// Свет: небесная полусфера + солнце с тенями вокруг самолёта
+scene.add(new THREE.HemisphereLight(0xd2e6ff, 0x4f5d3c, 0.62));
+const sun = new THREE.DirectionalLight(0xfff0d6, 1.05);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -26, right: 26, top: 26, bottom: -26, near: 1, far: 800 });
+sun.shadow.bias = -0.0004;
+scene.add(sun, sun.target);
+
+// Рельеф с вершинными цветами
+const mix3 = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+(function buildTerrain() {
+  const SIZE = 14000, SEG = 280;
+  const g = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
+  g.rotateX(-Math.PI / 2);
+  const p = g.attributes.position, colors = new Float32Array(p.count * 3);
+  const grass = [0.34, 0.5, 0.22], forest = [0.2, 0.36, 0.16], mown = [0.44, 0.6, 0.29];
+  const rock = [0.5, 0.47, 0.42], snow = [0.95, 0.96, 0.98], sand = [0.78, 0.73, 0.55];
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i), h = terrainHeight(x, z);
+    p.setY(i, h);
+    const n = fbm(x / 70, z / 70);
+    let c = mix3(grass, forest, smoothstep(0.35, 0.7, n));
+    c = mix3(mown, c, fieldMask(x, z));
+    c = mix3(c, rock, smoothstep(170, 290, h));
+    c = mix3(c, snow, smoothstep(340, 430, h));
+    if (h < WATER + 2.5) c = sand;
+    colors.set(c, i * 3);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  g.computeVertexNormals();
+  const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  // Вода и бесконечная равнина за краем карты
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(SIZE, SIZE), new THREE.MeshPhongMaterial({ color: 0x3a6c86, shininess: 90, specular: 0x8fb4c8 }));
+  water.rotation.x = -Math.PI / 2; water.position.y = WATER;
+  scene.add(water);
+  const outer = new THREE.Mesh(new THREE.PlaneGeometry(80000, 80000), new THREE.MeshLambertMaterial({ color: 0x55703f }));
+  outer.rotation.x = -Math.PI / 2; outer.position.y = -40;
+  scene.add(outer);
+})();
+
+// Полоса: текстура рисуется на canvas (разметка, пороги, номера)
+function runwayTexture() {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 4096;
+  const g = c.getContext('2d');
+  g.fillStyle = '#3a3d41'; g.fillRect(0, 0, 256, 4096);
+  for (let i = 0; i < 14000; i++) { const v = 48 + Math.random() * 34 | 0; g.fillStyle = `rgba(${v},${v},${v + 4},0.55)`; g.fillRect(Math.random() * 256, Math.random() * 4096, 2, 2); }
+  g.fillStyle = 'rgba(20,20,22,0.35)';                                    // следы шин в зоне касания
+  for (let i = 0; i < 40; i++) { g.fillRect(96 + Math.random() * 60, 3300 - Math.random() * 900, 3, 60 + Math.random() * 120); g.fillRect(96 + Math.random() * 60, 200 + Math.random() * 900, 3, 60 + Math.random() * 120); }
+  g.fillStyle = '#ecebe6';
+  g.fillRect(8, 0, 5, 4096); g.fillRect(243, 0, 5, 4096);                // боковые линии
+  for (let y = 380; y < 3716; y += 112) g.fillRect(125, y, 6, 62);       // осевая
+  for (let i = 0; i < 8; i++) { const x = 22 + i * 26 + (i >= 4 ? 10 : 0); g.fillRect(x, 24, 13, 150); g.fillRect(x, 4096 - 174, 13, 150); } // «зебра»
+  const m = 4096 / 1200;                                                  // пикселей на метр
+  const tdz = d => { g.fillRect(70, 4096 - d * m, 20, 70); g.fillRect(166, 4096 - d * m, 20, 70); g.fillRect(70, d * m - 70, 20, 70); g.fillRect(166, d * m - 70, 20, 70); };
+  tdz(150); tdz(450);
+  g.fillRect(58, 4096 - 300 * m, 34, 150); g.fillRect(164, 4096 - 300 * m, 34, 150);  // точка прицеливания
+  g.fillRect(58, 300 * m - 150, 34, 150); g.fillRect(164, 300 * m - 150, 34, 150);
+  g.font = 'bold 120px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('36', 128, 4096 - 280);
+  g.save(); g.translate(128, 280); g.rotate(Math.PI); g.fillText('18', 0, 0); g.restore();
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return t;
+}
+(function buildAirfield() {
+  const rw = new THREE.Mesh(new THREE.PlaneGeometry(RUNWAY.halfW * 2, RUNWAY.halfL * 2),
+    new THREE.MeshLambertMaterial({ map: runwayTexture(), polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  rw.rotation.x = -Math.PI / 2; rw.position.y = 0.05; rw.receiveShadow = true;
+  scene.add(rw);
+  const concrete = new THREE.MeshLambertMaterial({ color: 0x8b8d8c, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(70, 90), concrete);
+  apron.rotation.x = -Math.PI / 2; apron.position.set(-62, 0.04, 260); apron.receiveShadow = true; scene.add(apron);
+  const taxi = new THREE.Mesh(new THREE.PlaneGeometry(16, 14), concrete);
+  taxi.rotation.x = -Math.PI / 2; taxi.position.set(-22, 0.04, 260); scene.add(taxi);
+  // Ангар с полукруглой крышей
+  const wall = new THREE.MeshLambertMaterial({ color: 0xb9bdb9 }), roofM = new THREE.MeshLambertMaterial({ color: 0x6f7e86, side: THREE.DoubleSide });
+  const hangar = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(26, 7, 34), wall); body.position.y = 3.5;
+  const roof = new THREE.Mesh(new THREE.CylinderGeometry(13, 13, 34, 24, 1, false, -Math.PI / 2, Math.PI), roofM);
+  roof.rotation.x = Math.PI / 2; roof.scale.set(1, 1, 0.45); roof.position.y = 7; roof.rotation.z = 0;
+  const door = new THREE.Mesh(new THREE.PlaneGeometry(18, 6), new THREE.MeshLambertMaterial({ color: 0x2b3238 }));
+  door.position.set(13.01, 3, 0); door.rotation.y = Math.PI / 2;
+  hangar.add(body, roof, door); hangar.position.set(-112, 0, 260);
+  hangar.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  scene.add(hangar);
+  // Диспетчерская вышка
+  const tower = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.BoxGeometry(4, 12, 4), wall); shaft.position.y = 6;
+  const cab = new THREE.Mesh(new THREE.CylinderGeometry(4, 3.4, 3.4, 8), new THREE.MeshPhongMaterial({ color: 0x2d4a5c, shininess: 120 })); cab.position.y = 13.7;
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(4.4, 4.4, 0.5, 8), wall); cap.position.y = 15.6;
+  tower.add(shaft, cab, cap); tower.position.set(-80, 0, 330); scene.add(tower);
+  // Ветроуказатель
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 6, 6), wall); pole.position.set(32, 3, 470);
+  const sock = new THREE.Mesh(new THREE.ConeGeometry(0.6, 3.2, 12, 1, true), new THREE.MeshLambertMaterial({ color: 0xff7a1a, side: THREE.DoubleSide }));
+  sock.rotation.z = Math.PI / 2; sock.position.set(33.6, 5.8, 470); scene.add(pole, sock);
+})();
+
+// Огни PAPI: белые — выше глиссады, красные — ниже. Норма: 2 белых + 2 красных (3°)
+const papi = [];
+(function buildPAPI() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.25, 'rgba(255,255,255,0.9)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  const box = new THREE.BoxGeometry(1.6, 0.8, 0.6), boxM = new THREE.MeshLambertMaterial({ color: 0x3b3b3b });
+  [3.5, 3.17, 2.83, 2.5].forEach((thr, i) => {
+    const x = -24 - i * 7;
+    const unit = new THREE.Mesh(box, boxM); unit.position.set(x, 0.4, PAPI_Z); scene.add(unit);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: 0xffffff, fog: false, depthWrite: false, transparent: true }));
+    sp.position.set(x, 1.2, PAPI_Z); sp.scale.set(5, 5, 5); scene.add(sp);
+    papi.push({ sp, thr, x });
+  });
+})();
+
+// Лес: инстансы конусов, растут пятнами
+(function buildForest() {
+  const geo = new THREE.ConeGeometry(1, 1, 7); geo.translate(0, 0.5, 0);
+  const N = 3000, mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), N);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new V3(), p = new V3(), col = new THREE.Color();
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  let placed = 0;
+  for (let tries = 0; placed < N && tries < 60000; tries++) {
+    const x = (rnd() - 0.5) * 7600, z = (rnd() - 0.5) * 7600;
+    if (fieldMask(x, z) < 0.35) continue;
+    const h = terrainHeight(x, z);
+    if (h < WATER + 3 || h > 240 || fbm(x / 380 + 9, z / 380) < 0.5) continue;
+    const hh = 7 + rnd() * 10;
+    p.set(x, h - 0.6, z); s.set(hh * 0.3, hh, hh * 0.3);
+    m.compose(p, q, s); mesh.setMatrixAt(placed, m);
+    col.setRGB(0.16 + rnd() * 0.08, 0.3 + rnd() * 0.12, 0.13 + rnd() * 0.05); mesh.setColorAt(placed, col);
+    placed++;
+  }
+  mesh.count = placed;
+  scene.add(mesh);
+})();
+
+// Облака: кучевые из сплюснутых сфер
+(function buildClouds() {
+  const N = 95, PUFFS = 8;
+  const mesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 2), new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x5d6873 }), N * PUFFS);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new V3(), p = new V3();
+  let seed = 3; const rnd = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+  let k = 0;
+  for (let i = 0; i < N; i++) {
+    const cx = (rnd() - 0.5) * 12000, cz = (rnd() - 0.5) * 12000, cy = 520 + rnd() * 380, size = 0.7 + rnd() * 0.8;
+    for (let j = 0; j < PUFFS; j++) {
+      const r = (24 + rnd() * 32) * size;
+      p.set(cx + (rnd() - 0.5) * 120 * size, cy + rnd() * 14 * size, cz + (rnd() - 0.5) * 70 * size);
+      s.set(r, r * 0.58, r);
+      m.compose(p, q, s); mesh.setMatrixAt(k++, m);
+    }
+  }
+  scene.add(mesh);
+})();
+
+// ---------- 3. Модель самолёта ----------
+// Профиль NACA 2412: верх от задней кромки к передней, затем низ обратно
+function airfoil(sym, N = 14) {
+  const yt = x => 0.6 * (0.2969 * Math.sqrt(x) - 0.126 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4);
+  const yc = x => sym ? 0 : (x < 0.4 ? 0.02 / 0.16 * (0.8 * x - x * x) : 0.02 / 0.36 * (0.2 + 0.8 * x - x * x));
+  const pts = [];
+  for (let i = N; i >= 0; i--) { const x = (1 - Math.cos(Math.PI * i / N)) / 2; pts.push([x, yc(x) + yt(x)]); }
+  for (let i = 1; i <= N; i++) { const x = (1 - Math.cos(Math.PI * i / N)) / 2; pts.push([x, yc(x) - yt(x)]); }
+  return pts;
+}
+// Лофт крыла: сечения профиля вдоль размаха (+X), хорда вдоль +Z (назад), ось — четверть хорды
+function wingGeo({ span, root, tip, sweep = 0, dih = 0, thick = 1, t0 = 0, t1 = 1, seg = 4, cap = true, sym = false }) {
+  const prof = airfoil(sym), M = prof.length, pos = [], idx = [];
+  for (let s = 0; s <= seg; s++) {
+    const t = t0 + (t1 - t0) * s / seg, ch = root + (tip - root) * t;
+    for (const [x, y] of prof) pos.push(t * span, y * ch * thick + dih * t * span, (x - 0.25) * ch + sweep * t);
+  }
+  for (let s = 0; s < seg; s++) for (let j = 0; j < M - 1; j++) { const a = s * M + j, b = a + 1, c = a + M, d = c + 1; idx.push(a, b, c, b, d, c); }
+  if (cap) {   // законцовка
+    const base = pos.length / 3, last = seg * M; let cx = 0, cy = 0, cz = 0;
+    for (let j = 0; j < M; j++) { const o = (last + j) * 3; pos.push(pos[o], pos[o + 1], pos[o + 2]); cx += pos[o]; cy += pos[o + 1]; cz += pos[o + 2]; }
+    pos.push(cx / M, cy / M, cz / M);
+    for (let j = 0; j < M - 1; j++) idx.push(base + M, base + j, base + j + 1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+// Цилиндр между двумя точками (стойки, подкосы)
+function rod(a, b, r, mat) {
+  const d = new V3().subVectors(b, a), len = d.length();
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 8), mat);
+  m.position.copy(a).addScaledVector(d, 0.5);
+  m.quaternion.setFromUnitVectors(new V3(0, 1, 0), d.normalize());
+  return m;
+}
+const GEAR_H = 1.25;   // от центра масс до низа колёс
+function buildAirplane() {
+  const white = new THREE.MeshStandardMaterial({ color: 0xf3f3ef, roughness: 0.38, metalness: 0.15, side: THREE.DoubleSide });
+  const red = new THREE.MeshStandardMaterial({ color: 0xc62f2a, roughness: 0.4, metalness: 0.2, side: THREE.DoubleSide });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x23272b, roughness: 0.7, metalness: 0.3 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0xa9b0b5, roughness: 0.3, metalness: 0.8 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x1d3a52, roughness: 0.05, metalness: 0.6, transparent: true, opacity: 0.72 });
+  const root = new THREE.Group(), parts = {};
+
+  // Фюзеляж — тело вращения, хвостовая часть приподнята
+  const lathe = (pts) => { const g = new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), 32); g.rotateX(-Math.PI / 2); return g; };
+  const fg = lathe([[0, -4.45], [0.1, -4.4], [0.22, -3.8], [0.36, -2.8], [0.5, -1.7], [0.6, -0.6], [0.63, 0.3], [0.62, 1.1], [0.58, 1.6]]);
+  const fp = fg.attributes.position;
+  for (let i = 0; i < fp.count; i++) { const z = fp.getZ(i); if (z > 0.8) fp.setY(i, fp.getY(i) + (z - 0.8) * 0.075); }
+  fg.computeVertexNormals();
+  const fus = new THREE.Mesh(fg, white); fus.scale.x = 0.86; root.add(fus);
+  const cowl = new THREE.Mesh(lathe([[0.595, -1.55], [0.58, -1.9], [0.51, -2.15], [0.43, -2.3], [0.3, -2.36], [0, -2.37]].map(([r, y]) => [r, -y])), red);
+  cowl.scale.x = 0.86; root.add(cowl);
+  // Красное кольцо на стыке капота и фюзеляжа
+  const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.637, 0.62, 0.16, 32, 1, true), red);
+  ring.rotation.x = Math.PI / 2; ring.scale.set(0.86, 1, 1); ring.position.set(0, 0, -1.48); root.add(ring);
+  // Остекление кабины
+  const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.6, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), glass);
+  canopy.scale.set(0.86, 0.75, 1.55); canopy.position.set(0, 0.16, -0.05); root.add(canopy);
+
+  // Крыло (верхнеплан) с законцовками и элеронами
+  const wing = new THREE.Group(); wing.position.set(0, 0.64, 0.1); root.add(wing);
+  const wspec = { span: 5.45, root: 1.6, tip: 1.15, dih: 0.03 };
+  const wMain = wingGeo({ ...wspec, t1: 0.93, cap: false, seg: 6 });
+  const wTip = wingGeo({ ...wspec, t0: 0.93, t1: 1, seg: 1 });
+  const ailerons = [];
+  for (const side of [1, -1]) {
+    const a = new THREE.Mesh(wMain, white), b = new THREE.Mesh(wTip, red);
+    a.scale.x = b.scale.x = side; wing.add(a, b);
+    const piv = new THREE.Group(); piv.position.set(side * 4.15, 0.13, 0.86);
+    const ail = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.05, 0.3), white); ail.position.z = 0.15; piv.add(ail);
+    wing.add(piv); ailerons.push({ piv, side });
+  }
+  parts.ailerons = ailerons;
+  // Подкосы
+  for (const s of [1, -1]) root.add(rod(new V3(s * 0.48, -0.32, 0.15), new V3(s * 2.6, 0.72, 0.15), 0.045, metal));
+
+  // Горизонтальное оперение и руль высоты
+  const stab = new THREE.Group(); stab.position.set(0, 0.2, 3.75); root.add(stab);
+  const sg = wingGeo({ span: 1.8, root: 0.85, tip: 0.6, sym: true, thick: 0.9 });
+  const elevPiv = new THREE.Group(); elevPiv.position.z = 0.6375; stab.add(elevPiv);
+  const eg = wingGeo({ span: 1.75, root: 0.38, tip: 0.3, sweep: -0.2075, sym: true, thick: 0.8 });
+  for (const s of [1, -1]) {
+    const m = new THREE.Mesh(sg, white); m.scale.x = s; stab.add(m);
+    const e = new THREE.Mesh(eg, white); e.scale.x = s; e.position.z = 0.095; elevPiv.add(e);
+  }
+  parts.elevator = elevPiv;
+  // Киль и руль направления
+  const fin = new THREE.Group(); fin.position.set(0, 0.3, 3.4); root.add(fin);
+  const fg2 = wingGeo({ span: 1.5, root: 1.3, tip: 0.65, sweep: 0.85, sym: true }); fg2.rotateZ(Math.PI / 2);
+  fin.add(new THREE.Mesh(fg2, red));
+  const rudPiv = new THREE.Group(); rudPiv.position.z = 0.975; fin.add(rudPiv);
+  const rg = wingGeo({ span: 1.45, root: 0.4, tip: 0.3, sweep: 0.3375, sym: true, thick: 0.8 }); rg.rotateZ(Math.PI / 2);
+  const rud = new THREE.Mesh(rg, red); rud.position.z = 0.1; rudPiv.add(rud);
+  parts.rudder = rudPiv;
+
+  // Винт: кок, лопасти, диск размытия
+  const prop = new THREE.Group(); prop.position.set(0, 0, -2.4); root.add(prop);
+  const spinG = new THREE.ConeGeometry(0.21, 0.42, 24); spinG.rotateX(-Math.PI / 2); spinG.translate(0, 0, -0.2);
+  prop.add(new THREE.Mesh(spinG, red));
+  const blades = new THREE.Group(); prop.add(blades);
+  for (const s of [1, -1]) {
+    const bl = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.9, 0.03), dark); bl.position.y = s * 0.5; bl.rotation.y = 0.28 * s; blades.add(bl);
+    const tipm = new THREE.Mesh(new THREE.BoxGeometry(0.131, 0.1, 0.031), new THREE.MeshStandardMaterial({ color: 0xffc400 })); tipm.position.y = s * 0.9; tipm.rotation.y = 0.28 * s; blades.add(tipm);
+  }
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(0.97, 40), new THREE.MeshBasicMaterial({ color: 0x222222, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+  disc.position.z = -0.02; prop.add(disc);
+  parts.blades = blades; parts.disc = disc;
+
+  // Шасси: основные стойки-рессоры с обтекателями, носовая стойка
+  const wheelG = new THREE.CylinderGeometry(0.25, 0.25, 0.14, 20); wheelG.rotateZ(Math.PI / 2);
+  for (const s of [1, -1]) {
+    root.add(rod(new V3(s * 0.42, -0.5, 0.45), new V3(s * 1.15, -1.0, 0.45), 0.045, metal));
+    const w = new THREE.Mesh(wheelG, dark); w.position.set(s * 1.18, -1.0, 0.45); root.add(w);
+    const pant = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), white); pant.scale.set(0.13, 0.27, 0.5); pant.position.set(s * 1.18, -0.98, 0.45); root.add(pant);
+  }
+  root.add(rod(new V3(0, -0.45, -1.8), new V3(0, -1.03, -1.9), 0.05, metal));
+  const nw = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.12, 20).rotateZ(Math.PI / 2), dark); nw.position.set(0, -1.03, -1.9); root.add(nw);
+
+  // Аэронавигационные огни и проблесковый маяк
+  const lamp = (c, x, y, z) => { const m = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), new THREE.MeshBasicMaterial({ color: c })); m.position.set(x, y, z); root.add(m); return m; };
+  lamp(0xff2a2a, -5.46, 0.81, 0.0); lamp(0x2aff5a, 5.46, 0.81, 0.0);
+  parts.strobe = lamp(0xffffff, 0, 1.82, 4.27);
+
+  // Кабина (видна только из кабины): капот впереди, козырёк приборной доски, стойки фонаря
+  const cockpit = new THREE.Group(); cockpit.visible = false; root.add(cockpit);
+  const panelM = new THREE.MeshStandardMaterial({ color: 0x1e2429, roughness: 0.85 });
+  const hoodM = new THREE.MeshStandardMaterial({ color: 0xf3f3ef, roughness: 0.38, metalness: 0.15 });
+  const hood = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.4, 1.3, 32).rotateX(Math.PI / 2), hoodM);
+  hood.scale.x = 0.86; hood.position.set(0, -0.22, -1.75); cockpit.add(hood);
+  const hoodTip = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.3, 0.25, 32).rotateX(Math.PI / 2), red);
+  hoodTip.scale.x = 0.86; hoodTip.position.set(0, -0.22, -2.52); cockpit.add(hoodTip);
+  const shield = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.07, 0.45), panelM); shield.position.set(0, 0.1, -0.95); cockpit.add(shield);
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.6, 0.08), panelM); panel.position.set(0, -0.22, -0.74); cockpit.add(panel);
+  for (const x of [-0.62, 0.62]) cockpit.add(rod(new V3(x, 0.12, -1.12), new V3(x * 0.92, 0.66, -0.5), 0.022, panelM));
+  cockpit.add(rod(new V3(0, 0.12, -1.15), new V3(0, 0.66, -0.55), 0.014, panelM));
+  parts.cockpit = cockpit;
+  parts.exterior = [fus, cowl, ring, canopy];
+
+  root.traverse(o => { if (o.isMesh && o !== disc && !cockpit.children.includes(o)) o.castShadow = true; });
+  return { root, parts };
+}
+const airplane = buildAirplane();
+scene.add(airplane.root);
+
+// ---------- 4. Физика ----------
+const P = {
+  mass: 1100, S: 16.2, rho: 1.225,          // масса (кг), площадь крыла (м²), плотность воздуха
+  CL0: 0.25, CLa: 5.0, aStall: 0.26,        // Cy при α=0, производная по α (1/рад), критический угол ≈15°
+  CD0: 0.03, K: 0.05,                       // вредное и индуктивное сопротивление
+  thrust: 4200                              // максимальная тяга (Н)
+};
+const WEIGHT = P.mass * 9.81;
+const plane = {
+  pos: new V3(), vel: new V3(), q: new THREE.Quaternion(), w: new V3(),
+  throttle: 0, flaps: 0, brake: false, onGround: false, crashed: false,
+  alpha: 0, beta: 0, stall: false, lift: 0, airTime: 0, groundH: 0,
+  CL: 0, CD: 0, qd: 0, drag: 0, thrust: 0, liftDir: new V3(0, 1, 0), vdir: new V3(0, 0, -1)   // для лаборатории
+};
+const tmp = { v: new V3(), v2: new V3(), v3: new V3(), f: new V3(), fwd: new V3(), up: new V3(), right: new V3(), axis: new V3(), inv: new THREE.Quaternion(), dq: new THREE.Quaternion(), e: new THREE.Euler(0, 0, 0, 'YXZ') };
+let simTime = 0;
+
+function physicsStep(dt) {
+  const s = plane, t = tmp;
+  t.fwd.set(0, 0, -1).applyQuaternion(s.q);
+  t.up.set(0, 1, 0).applyQuaternion(s.q);
+  t.right.set(1, 0, 0).applyQuaternion(s.q);
+  t.inv.copy(s.q).invert();
+  const vb = t.v.copy(s.vel).applyQuaternion(t.inv);       // скорость в связанной системе
+  const V = s.vel.length();
+  s.alpha = V > 2 ? Math.atan2(-vb.y, -vb.z) : 0;           // угол атаки
+  s.beta = V > 2 ? Math.atan2(vb.x, -vb.z) : 0;             // угол скольжения
+
+  // Коэффициент подъёмной силы: линейный участок, затем срыв потока
+  const a = s.alpha, flapCL = s.flaps * 0.22;
+  let CL;
+  if (Math.abs(a) <= P.aStall) CL = P.CL0 + flapCL + P.CLa * a;
+  else if (Math.abs(a) < 0.6) CL = (P.CL0 + flapCL + P.CLa * P.aStall * Math.sign(a)) * (1 - (Math.abs(a) - P.aStall) * 1.9);
+  else CL = 0.9 * Math.sin(2 * a);
+  s.stall = !s.onGround && V > 8 && Math.abs(a) > P.aStall;
+
+  const agl = s.pos.y - GEAR_H - s.groundH;
+  const ge = 1 + 0.18 * (1 - clamp(agl / 9, 0, 1));         // экранный эффект у земли
+  const qd = 0.5 * P.rho * V * V;                           // скоростной напор
+  const F = t.f.set(0, -WEIGHT, 0);                         // сила тяжести
+  s.lift = 0; s.drag = 0;
+  if (V > 0.5) {
+    const vdir = t.v2.copy(s.vel).divideScalar(V);
+    const liftDir = t.v3.crossVectors(t.right, vdir);
+    if (liftDir.lengthSq() > 1e-6) {
+      liftDir.normalize();
+      s.lift = qd * P.S * CL * ge;
+      F.addScaledVector(liftDir, s.lift);                    // подъёмная сила ⟂ потоку
+      s.liftDir.copy(liftDir);
+    }
+    const CD = P.CD0 + P.K * CL * CL / ge + s.flaps * 0.018;
+    s.drag = qd * P.S * CD; s.CD = CD; s.vdir.copy(vdir);
+    F.addScaledVector(vdir, -s.drag);                       // лобовое сопротивление
+    F.addScaledVector(t.right, -qd * P.S * 0.9 * Math.sin(s.beta)); // боковая сила фюзеляжа
+  }
+  s.thrust = s.throttle * P.thrust * clamp(1 - V / 160, 0.3, 1);
+  F.addScaledVector(t.fwd, s.thrust);                       // тяга винта
+  s.CL = CL; s.qd = qd;
+  s.vel.addScaledVector(F, dt / P.mass);
+  s.pos.addScaledVector(s.vel, dt);
+
+  // Вращение: команды пилота + флюгерная устойчивость; эффективность рулей растёт с напором
+  const eff = clamp(qd / 1240, 0, 1.8), effC = Math.min(eff, 1.2);
+  // Балансировка на постоянный угол атаки: самолёт устойчив по скорости,
+  // как настоящий — разгон ведёт к набору высоты, газ управляет вертикальной скоростью
+  // в крене чуть увеличиваем угол атаки, чтобы вираж не превращался в спираль
+  const aTrim = 0.035 + (1 / Math.max(t.up.y, 0.5) - 1) * 0.12;
+  let tp = input.pitch * 0.8 * effC - (clamp(a, -0.8, 0.8) - aTrim) * 3.0 * Math.max(eff, 0.25);
+  let ty = input.yaw * 0.5 * effC - clamp(s.beta, -0.8, 0.8) * 1.8 * Math.max(eff, 0.2);
+  let tr = -input.roll * 1.9 * effC - t.right.y * 0.35 * effC;   // поперечное V крыла плавно выравнивает крен
+  if (s.stall) { tp -= 0.35; tr += Math.sin(simTime * 1.7) * 0.7; }   // срыв: нос опускается, крыло валится
+  const k = 1 - Math.exp(-dt * 5);
+  s.w.x += (tp - s.w.x) * k; s.w.y += (ty - s.w.y) * k; s.w.z += (tr - s.w.z) * k;
+  const ang = s.w.length() * dt;
+  if (ang > 1e-8) { t.axis.copy(s.w).normalize(); t.dq.setFromAxisAngle(t.axis, ang); s.q.multiply(t.dq).normalize(); }
+
+  groundContact(dt, V);
+  if (!s.onGround) s.airTime += dt;
+  simTime += dt;
+}
+
+function onRunway(x, z) { return Math.abs(x) < RUNWAY.halfW && Math.abs(z) < RUNWAY.halfL; }
+
+function groundContact(dt, V) {
+  const s = plane, t = tmp;
+  const terr = terrainHeight(s.pos.x, s.pos.z);
+  s.groundH = Math.max(terr, WATER);
+  if (s.pos.y - GEAR_H > s.groundH) { s.onGround = false; return; }
+
+  const e = t.e.setFromQuaternion(s.q, 'YXZ');
+  if (!s.onGround) {   // момент касания
+    const vs = -s.vel.y;
+    if (terr < WATER) return crash('Посадка на воду');
+    const slope = Math.hypot(terrainHeight(s.pos.x + 3, s.pos.z) - terr, terrainHeight(s.pos.x, s.pos.z + 3) - terr) / 3;
+    if (slope > 0.18) return crash('Столкновение с рельефом');
+    if (vs > 5.5) return crash('Слишком жёсткое касание');
+    if (Math.abs(e.z) > 0.45) return crash('Касание крылом');
+    if (e.x < -0.17) return crash('Удар носовой стойкой');
+    if (fieldMask(s.pos.x, s.pos.z) > 0.3 && V > 32) return crash('Неровная местность');
+    if (s.airTime > 3) onTouchdown(vs, e, V);
+  }
+  s.onGround = true; s.airTime = 0;
+  s.pos.y = s.groundH + GEAR_H;
+  if (s.vel.y < 0) s.vel.y = 0;
+
+  // На колёсах: крен гаснет, нос не ниже горизонта, хвост не ниже 14°
+  let pitch = e.x, yaw = e.y, roll = e.z * Math.exp(-dt * 10);
+  if (pitch < 0) pitch *= Math.exp(-dt * 12);
+  pitch = Math.min(pitch, 0.24);
+  if (s.lift < WEIGHT) pitch = Math.max(0, pitch - dt * 0.35 * (1 - s.lift / WEIGHT));
+  const vh = Math.hypot(s.vel.x, s.vel.z);
+  yaw += input.yaw * 0.55 * dt * clamp(vh / 5, 0.15, 1);    // руление носовым колесом
+  s.q.setFromEuler(e.set(pitch, yaw, roll, 'YXZ'));
+  s.w.y = 0; s.w.z = 0; if (pitch <= 0) s.w.x = Math.max(s.w.x, 0);
+
+  // Трение качения, тормоза, боковое сцепление колёс
+  const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
+  let vf = s.vel.x * fx + s.vel.z * fz, vsd = (s.vel.x * rx + s.vel.z * rz) * Math.exp(-dt * 9);
+  const decel = (onRunway(s.pos.x, s.pos.z) ? 0.25 : 1.3) + (s.brake ? 5.5 : 0);
+  vf = vf > 0 ? Math.max(0, vf - decel * dt) : Math.min(0, vf + decel * dt * 2);
+  s.vel.set(fx * vf + rx * vsd, Math.max(s.vel.y, 0), fz * vf + rz * vsd);
+}
+
+// ---------- 5. Ввод ----------
+const keys = new Set();
+const input = { pitch: 0, roll: 0, yaw: 0 };
+const any = (...c) => c.some(k => keys.has(k));
+addEventListener('keydown', e => {
+  keys.add(e.code);
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code) || e.ctrlKey) e.preventDefault();
+  if (e.repeat) return;
+  initAudio();
+  if (state.screen === 'project') { if (e.code === 'Escape') openMenu(); return; }
+  if (state.screen === 'menu') return;
+  switch (e.code) {
+    case 'KeyC': setCamera(camMode === 'chase' ? 'cockpit' : 'chase'); break;
+    case 'KeyF': if (state.screen === 'play') { plane.flaps = (plane.flaps + 1) % 3; toast(['Закрылки убраны', 'Закрылки: взлётное положение', 'Закрылки: посадочное положение'][plane.flaps]); } break;
+    case 'KeyR': start(state.mode); break;
+    case 'Escape': openMenu(); break;
+    case 'KeyH': $('#help').hidden = !$('#help').hidden; break;
+    case 'KeyV': viz.arrows = !viz.arrows; toast(viz.arrows ? 'Векторы сил: включены' : 'Векторы сил: выключены'); break;
+    case 'KeyL': viz.lab = !viz.lab; $('#lab').hidden = !viz.lab || state.screen !== 'play'; break;
+    case 'KeyM': if (audio) { audio.on = !audio.on; toast(audio.on ? 'Звук включён' : 'Звук выключен'); } break;
+  }
+});
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+
+function updateInputs(dt) {
+  const tgt = {
+    pitch: (any('KeyW', 'ArrowUp') ? 1 : 0) - (any('KeyS', 'ArrowDown') ? 1 : 0),
+    roll: (any('KeyD', 'ArrowRight') ? 1 : 0) - (any('KeyA', 'ArrowLeft') ? 1 : 0),
+    yaw: (any('KeyQ') ? 1 : 0) - (any('KeyE') ? 1 : 0)
+  };
+  const k = 1 - Math.exp(-dt * 6);                          // плавные оси, как у реального штурвала
+  for (const a in tgt) input[a] += (tgt[a] - input[a]) * k;
+  if (any('ShiftLeft', 'ShiftRight', 'Equal', 'NumpadAdd')) plane.throttle = Math.min(1, plane.throttle + dt * 0.55);
+  if (any('ControlLeft', 'ControlRight', 'Minus', 'NumpadSubtract')) plane.throttle = Math.max(0, plane.throttle - dt * 0.55);
+  plane.brake = any('Space', 'KeyB');
+}
+
+// Мышь: вращение внешней камеры
+const orbit = { yaw: 0, pitch: 0, drag: false, lx: 0, ly: 0 };
+canvas.addEventListener('pointerdown', e => { orbit.drag = true; orbit.lx = e.clientX; orbit.ly = e.clientY; });
+addEventListener('pointerup', () => orbit.drag = false);
+addEventListener('pointermove', e => {
+  if (!orbit.drag) return;
+  orbit.yaw -= (e.clientX - orbit.lx) * 0.006; orbit.pitch = clamp(orbit.pitch + (e.clientY - orbit.ly) * 0.004, -0.5, 1.2);
+  orbit.lx = e.clientX; orbit.ly = e.clientY;
+});
+
+// Звук мотора (WebAudio, запускается после первого нажатия)
+let audio = null;
+function initAudio() {
+  if (audio) return;
+  try {
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const o1 = ac.createOscillator(), o2 = ac.createOscillator(), f = ac.createBiquadFilter(), g = ac.createGain();
+    o1.type = 'sawtooth'; o2.type = 'square'; f.type = 'lowpass'; f.frequency.value = 520; g.gain.value = 0;
+    o1.connect(f); o2.connect(f); f.connect(g); g.connect(ac.destination); o1.start(); o2.start();
+    audio = { ac, o1, o2, g, on: true };
+  } catch (err) { audio = null; }
+}
+function updateAudio() {
+  if (!audio) return;
+  const t = audio.ac.currentTime, base = 42 + plane.throttle * 75 + plane.vel.length() * 0.15;
+  audio.o1.frequency.setTargetAtTime(base, t, 0.12);
+  audio.o2.frequency.setTargetAtTime(base * 0.5 + 2.5, t, 0.12);
+  const live = audio.on && state.screen === 'play' && !plane.crashed;
+  audio.g.gain.setTargetAtTime(live ? 0.025 + plane.throttle * 0.045 : 0, t, 0.1);
+}
+
+// ---------- 6. Режимы и задание ----------
+const state = { screen: 'menu', mode: 'mission', phase: 'takeoff', landing: null, crashTimer: 0, crashReason: '' };
+const missionText = {
+  takeoff: 'Взлёт. Дайте полный газ (Shift), на 100–110 км/ч плавно потяните W.',
+  climb: 'Наберите высоту 150 м. Уберите закрылки (F).',
+  circuit: 'Развернитесь и зайдите на полосу. Закрылки 2, скорость 110–130 км/ч. PAPI: 2 белых + 2 красных огня.',
+  rollout: 'Касание! Уберите газ (Ctrl или −) и тормозите пробелом.',
+  free: 'Свободный полёт. Аэродром «Восход» впереди, полоса 36. Можно сесть в любой момент.'
+};
+
+function resetPlane(air) {
+  const s = plane;
+  s.w.set(0, 0, 0); s.crashed = false; s.stall = false; s.brake = false; s.airTime = 0;
+  s.q.setFromEuler(new THREE.Euler(0, 0, 0, 'YXZ'));
+  if (air) {
+    const z = 2600;
+    s.pos.set(0, Math.max(450, terrainHeight(0, z) + 260), z);
+    s.vel.set(0, 0, -55); s.throttle = 0.62; s.flaps = 0; s.onGround = false; s.airTime = 10;
+  } else {
+    s.pos.set(0, GEAR_H, 565); s.vel.set(0, 0, 0); s.throttle = 0; s.flaps = 1; s.onGround = true;
+  }
+  s.groundH = Math.max(terrainHeight(s.pos.x, s.pos.z), WATER);
+  airplane.root.visible = true;
+  for (const a in input) input[a] = 0;
+}
+
+function start(mode) {
+  state.mode = mode; state.screen = 'play'; state.landing = null; state.crashTimer = 0;
+  state.phase = mode === 'free' ? 'free' : 'takeoff';
+  resetPlane(mode === 'free');
+  clearParticles();
+  $('#menu').hidden = true; $('#result').hidden = true; $('#project').hidden = true;
+  $('#mission').hidden = false; $('#help').hidden = window.innerWidth < 760;
+  $('#missionTitle').textContent = mode === 'free' ? 'Свободный полёт' : 'Задание · взлёт и посадка';
+  orbit.yaw = 0; orbit.pitch = 0; camSnap = true;
+  initAudio();
+}
+function openMenu() {
+  state.screen = 'menu'; $('#menu').hidden = false; $('#result').hidden = true; $('#project').hidden = true; $('#lab').hidden = true; $('#mission').hidden = true; $('#help').hidden = true;
+  resetPlane(false); setCamera('chase');
+}
+
+function crash(reason) {
+  plane.crashed = true; state.crashReason = reason; state.crashTimer = 1.8;
+  plane.vel.set(0, 0, 0); airplane.root.visible = false;
+  spawnExplosion(plane.pos);
+}
+
+// Касание полосы: замер параметров
+function onTouchdown(vs, e, V) {
+  const s = plane, north = s.vel.z < 0;
+  const dist = north ? RUNWAY.halfL - s.pos.z : s.pos.z + RUNWAY.halfL;  // от порога, м
+  state.landing = { vs, roll: e.z * DEG, offset: s.pos.x, dist, speed: V * 3.6, onRunway: onRunway(s.pos.x, s.pos.z), stop: null };
+  if (state.mode === 'mission' && (state.phase === 'circuit' || state.phase === 'climb')) state.phase = 'rollout';
+  if (state.mode === 'free') toast(`Касание: ${vs.toFixed(1)} м/с · оценка ${scoreLanding(state.landing)}`);
+}
+
+function scoreLanding(L) {
+  let sc = 100;
+  sc -= Math.max(0, L.vs - 0.8) * 16;                            // вертикальная скорость
+  sc -= Math.max(0, Math.abs(L.roll) - 2) * 2.5;                 // крен
+  sc -= Math.max(0, Math.abs(L.offset) - 2) * 2;                 // уход с оси
+  if (L.dist < 60) sc -= Math.min(30, 8 + (60 - L.dist) * 0.2);  // недолёт до зоны касания
+  else if (L.dist > 500) sc -= Math.min(30, 8 + (L.dist - 500) * 0.06); // перелёт
+  sc -= Math.max(0, L.speed - 140) * 0.8;                        // слишком быстро
+  if (!L.onRunway) sc = Math.min(sc, 30);
+  return clamp(Math.round(sc), 0, 100);
+}
+const gradeOf = sc => sc >= 90 ? 'Отлично' : sc >= 75 ? 'Хорошо' : sc >= 55 ? 'Удовлетворительно' : sc >= 30 ? 'Жёсткая посадка' : 'Неудача';
+
+function updateMission(dt) {
+  const s = plane, agl = s.pos.y - GEAR_H - s.groundH;
+  if (state.mode === 'mission') {
+    if (state.phase === 'takeoff' && !s.onGround && agl > 5) { state.phase = 'climb'; toast('Отрыв! Набирайте высоту'); }
+    if (state.phase === 'climb' && s.pos.y > 150) { state.phase = 'circuit'; toast('150 м. Заходите на посадку'); }
+    if (state.phase === 'rollout' && !s.onGround && agl > 8) { state.phase = 'circuit'; toast('Уход на второй круг'); }
+    if (state.phase === 'rollout' && s.onGround && s.vel.length() < 1.5) {
+      state.landing.stop = { onRunway: onRunway(s.pos.x, s.pos.z) };
+      showResult();
+    }
+  }
+  $('#missionText').textContent = missionText[state.phase];
+  // Навигация к порогу полосы 36 (южный)
+  const dx = 0 - s.pos.x, dz = RUNWAY.halfL - s.pos.z, d = Math.hypot(dx, dz);
+  const brg = (Math.atan2(dx, -dz) * DEG + 360) % 360;
+  const showNav = state.phase === 'circuit' || state.phase === 'free' || state.phase === 'climb';
+  $('#missionNav').textContent = showNav && d > 150 ? `Порог ВПП 36: ${(d / 1000).toFixed(1)} км · пеленг ${String(Math.round(brg)).padStart(3, '0')}°` : '';
+}
+
+function showResult(crashed) {
+  state.screen = 'result'; $('#lab').hidden = true;
+  const tbl = $('#resTable'); tbl.innerHTML = '';
+  const row = (k, v, ok) => { const tr = document.createElement('tr'); tr.innerHTML = `<td>${k}</td><td class="${ok === undefined ? '' : ok ? 'good' : 'bad'}">${v}</td>`; tbl.appendChild(tr); };
+  if (crashed) {
+    $('#resEyebrow').textContent = 'АВАРИЯ';
+    $('#resTitle').textContent = state.crashReason;
+    $('#resScore').textContent = '0'; $('#resGrade').textContent = 'Самолёт разрушен';
+    row('Совет', 'касайтесь со снижением до 2 м/с, крыльями ровно');
+  } else {
+    const L = state.landing, sc = scoreLanding(L);
+    $('#resEyebrow').textContent = 'ОЦЕНКА ПОСАДКИ';
+    $('#resTitle').textContent = L.onRunway ? 'Самолёт на полосе' : 'Посадка вне полосы';
+    $('#resScore').textContent = sc; $('#resGrade').textContent = gradeOf(sc);
+    row('Вертикальная скорость касания', `${L.vs.toFixed(2)} м/с`, L.vs <= 1.5);
+    row('Скорость касания', `${Math.round(L.speed)} км/ч`, L.speed <= 140);
+    row('Крен при касании', `${Math.abs(L.roll).toFixed(1)}°`, Math.abs(L.roll) <= 4);
+    row('Отклонение от оси', `${Math.abs(L.offset).toFixed(1)} м`, Math.abs(L.offset) <= 4);
+    row('Касание от порога', `${Math.round(L.dist)} м`, L.dist >= 60 && L.dist <= 500);
+    row('Остановка', L.stop && L.stop.onRunway ? 'на полосе' : 'за пределами', !!(L.stop && L.stop.onRunway));
+  }
+  $('#result').hidden = false;
+  $('#btnAgain').focus();
+}
+
+// Частицы: огненный шар и дым при аварии
+const particles = [];
+const fireGeo = new THREE.IcosahedronGeometry(1, 1);
+function spawnExplosion(p) {
+  for (let i = 0; i < 26; i++) {
+    const fire = i < 10;
+    const m = new THREE.Mesh(fireGeo, new THREE.MeshBasicMaterial({ color: fire ? 0xffa03a : 0x3a3633, transparent: true, opacity: fire ? 0.95 : 0.7, depthWrite: false }));
+    m.position.copy(p).add(new V3((Math.random() - 0.5) * 4, Math.random() * 2, (Math.random() - 0.5) * 4));
+    scene.add(m);
+    particles.push({ m, life: 0, max: fire ? 1.2 : 5 + Math.random() * 3, grow: fire ? 9 : 3.5, rise: fire ? 2 : 4 + Math.random() * 3, fire });
+  }
+}
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i]; p.life += dt;
+    const k = p.life / p.max;
+    p.m.scale.setScalar(1 + p.grow * Math.sqrt(k) * (p.fire ? 1 : 2));
+    p.m.position.y += p.rise * dt;
+    p.m.material.opacity = (p.fire ? 0.95 : 0.7) * (1 - k);
+    if (k >= 1) { scene.remove(p.m); p.m.material.dispose(); particles.splice(i, 1); }
+  }
+}
+function clearParticles() { for (const p of particles) { scene.remove(p.m); p.m.material.dispose(); } particles.length = 0; }
+
+// Тост
+let toastTimer = 0;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); toastTimer = 2.6; }
+
+// ---------- 7. Камеры ----------
+let camMode = 'chase', camSnap = true;
+const camPos = new V3(), camLook = new V3();
+function setCamera(mode) {
+  camMode = mode;
+  airplane.parts.cockpit.visible = mode === 'cockpit';
+  for (const m of airplane.parts.exterior) m.visible = mode !== 'cockpit';
+  camera.fov = mode === 'cockpit' ? 72 : 62; camera.updateProjectionMatrix();
+  camSnap = true;
+}
+function updateCamera(dt) {
+  const s = plane;
+  if (state.screen === 'menu') {             // заставка: облёт самолёта на полосе
+    const a = performance.now() * 0.00012;
+    camera.position.set(s.pos.x + Math.sin(a) * 15, s.pos.y + 3.2, s.pos.z + Math.cos(a) * 15);
+    camera.lookAt(s.pos.x, s.pos.y + 0.4, s.pos.z);
+    return;
+  }
+  if (camMode === 'cockpit' && !s.crashed) {
+    camera.position.set(0, 0.42, 0).applyQuaternion(s.q).add(s.pos);
+    camera.quaternion.copy(s.q).multiply(tmp.dq.setFromAxisAngle(tmp.axis.set(1, 0, 0), -0.04));
+    return;
+  }
+  // с векторами сил камера уходит вбок, чтобы тяга и сопротивление были видны в профиль
+  const restYaw = viz.arrows ? 1.15 : 0, restPitch = viz.arrows ? -0.05 : 0;
+  if (!orbit.drag) { orbit.yaw = restYaw + (orbit.yaw - restYaw) * Math.exp(-dt * 0.8); orbit.pitch = restPitch + (orbit.pitch - restPitch) * Math.exp(-dt * 0.8); }
+  // Позиция за хвостом: только курс самолёта, чтобы камера не кувыркалась вместе с ним
+  const e = tmp.e.setFromQuaternion(s.q, 'YXZ');
+  const yaw = e.y + orbit.yaw, pit = 0.18 + orbit.pitch + e.x * 0.6, dist = 15;
+  const desired = tmp.v.set(Math.sin(yaw) * Math.cos(pit) * dist, Math.sin(pit) * dist + 1.5, Math.cos(yaw) * Math.cos(pit) * dist).add(s.pos);
+  const gmin = surfaceHeight(desired.x, desired.z) + 1.5;
+  if (desired.y < gmin) desired.y = gmin;
+  const k = camSnap ? 1 : 1 - Math.exp(-dt * 6);
+  camPos.lerp(desired, k); camLook.lerp(tmp.v2.copy(s.pos).add(tmp.v3.set(0, 1.2, 0)), camSnap ? 1 : 1 - Math.exp(-dt * 12));
+  camSnap = false;
+  camera.position.copy(camPos); camera.up.set(0, 1, 0); camera.lookAt(camLook);
+}
+
+// Векторы сил (STEAM-режим): стрелки на самолёте, длина пропорциональна силе (вес = 6 м)
+const viz = { arrows: false, lab: false };
+const FORCE_SCALE = 6 / WEIGHT;
+function makeArrow(color) {
+  const m = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.92 });
+  const g = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1, 10).translate(0, 0.5, 0), m);
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.8, 14), m);
+  g.add(shaft, head); g.renderOrder = 20; shaft.renderOrder = head.renderOrder = 20;
+  g.visible = false; scene.add(g);
+  return { g, shaft, head, tip: new V3(), value: 0 };
+}
+const forceArrows = { lift: makeArrow(0x6fe3a0), weight: makeArrow(0xff5b4f), thrust: makeArrow(0xffb547), drag: makeArrow(0x5cc8ff) };
+const _up = new V3(0, 1, 0);
+function setArrow(a, origin, dir, force) {
+  const len = Math.max(0.05, Math.abs(force) * FORCE_SCALE);
+  a.value = force;
+  if (len < 0.3) { a.g.visible = false; return; }
+  a.g.visible = true;
+  a.g.position.copy(origin);
+  a.g.quaternion.setFromUnitVectors(_up, tmp.axis.copy(dir).multiplyScalar(Math.sign(force) || 1).normalize());
+  a.shaft.scale.y = Math.max(len - 0.8, 0.01);
+  a.head.position.y = Math.max(len - 0.4, 0.4);
+  a.tip.copy(tmp.axis).multiplyScalar(len + 0.6).add(origin);
+}
+function updateArrows() {
+  const s = plane, show = viz.arrows && state.screen === 'play' && !s.crashed && camMode !== 'cockpit';
+  if (!show) { for (const k in forceArrows) forceArrows[k].g.visible = false; return; }
+  const fwd = tmp.fwd.set(0, 0, -1).applyQuaternion(s.q);
+  setArrow(forceArrows.lift, s.pos, s.liftDir, s.lift);
+  setArrow(forceArrows.weight, s.pos, tmp.v.set(0, -1, 0), WEIGHT);
+  setArrow(forceArrows.thrust, tmp.v2.copy(fwd).multiplyScalar(2.6).add(s.pos), fwd, s.thrust);
+  setArrow(forceArrows.drag, tmp.v3.copy(fwd).multiplyScalar(-4.4).add(s.pos), tmp.v.copy(s.vdir).negate(), s.drag);
+}
+// Панель «Лаборатория»: живые значения формул
+let labTimer = 0;
+function updateLab(dt) {
+  const el = $('#lab');
+  el.hidden = !(viz.lab && state.screen === 'play');
+  if (el.hidden || (labTimer -= dt) > 0) return;
+  labTimer = 0.1;
+  const s = plane, kN = f => (f / 1000).toFixed(2) + ' кН';
+  const cymax = P.CL0 + s.flaps * 0.22 + P.CLa * P.aStall;
+  const vmin = Math.sqrt(2 * WEIGHT / (P.rho * P.S * cymax)) * 3.6;
+  const sw = c => `<i style="background:${c}"></i>`;
+  const rows = [
+    ['Угол атаки α', (s.alpha * DEG).toFixed(1) + '°'],
+    ['C<sub>y</sub>', s.CL.toFixed(2)],
+    ['C<sub>x</sub>', s.CD.toFixed(3)],
+    ['Напор ρv²/2', Math.round(s.qd) + ' Па'],
+    [sw('#6fe3a0') + 'Y подъёмная', kN(s.lift)],
+    [sw('#ff5b4f') + 'G тяжести', kN(WEIGHT)],
+    [sw('#ffb547') + 'P тяга', kN(s.thrust)],
+    [sw('#5cc8ff') + 'X сопротивл.', kN(s.drag)],
+    ['Перегрузка Y/G', (s.lift / WEIGHT).toFixed(2)],
+    ['Качество K=Y/X', s.drag > 1 ? (s.lift / s.drag).toFixed(1) : '—'],
+    ['v<sub>min</sub> расчёт', Math.round(vmin) + ' км/ч']
+  ];
+  $('#labRows').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+}
+
+// Анимация модели: винт, рули, маяк, PAPI, тени
+function updateVisuals(dt) {
+  const s = plane, A = airplane;
+  A.root.position.copy(s.pos); A.root.quaternion.copy(s.q);
+  const rpm = state.screen === 'menu' ? 0 : 6 + s.throttle * 70;
+  A.parts.blades.rotation.z += rpm * dt;
+  A.parts.disc.material.opacity = clamp((rpm - 20) / 60, 0, 0.28);
+  A.parts.blades.visible = rpm < 55 || camMode !== 'cockpit';
+  A.parts.elevator.rotation.x = -input.pitch * 0.38;
+  A.parts.rudder.rotation.y = input.yaw * 0.4;
+  for (const a of A.parts.ailerons) a.piv.rotation.x = input.roll * 0.3 * a.side;
+  A.parts.strobe.visible = (performance.now() % 1300) < 90;
+  for (const l of papi) {
+    const d = Math.hypot(s.pos.x - l.x, s.pos.z - PAPI_Z), el = Math.atan2(s.pos.y - 1.2, d) * DEG;
+    l.sp.material.color.setHex(el > l.thr ? 0xffffff : 0xff2a1a);
+  }
+  sun.position.copy(s.pos).addScaledVector(sunDir, 300); sun.target.position.copy(s.pos);
+  updateArrows();
+}
+
+// ---------- 8. HUD ----------
+const hud = $('#hud'), ctx = hud.getContext('2d');
+let W = 0, H = 0, dpr = 1;
+function resize() {
+  W = innerWidth; H = innerHeight; dpr = Math.min(window.devicePixelRatio || 1, 2);
+  renderer.setSize(W, H, false); camera.aspect = W / H; camera.updateProjectionMatrix();
+  hud.width = W * dpr; hud.height = H * dpr;
+}
+addEventListener('resize', resize);
+const FM = '"IBM Plex Mono", ui-monospace, monospace', FD = '"Chakra Petch", system-ui, sans-serif';
+const AMBER = '#ffb547', INK = '#e8f1f4', MUTED = '#9fb6c2', ALERT = '#ff5b4f', GLASS = 'rgba(8,20,30,0.66)', RULE = 'rgba(160,205,225,0.28)';
+function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function box(x, y, w, h) { rrect(x, y, w, h, 10); ctx.fillStyle = GLASS; ctx.fill(); ctx.strokeStyle = RULE; ctx.lineWidth = 1; ctx.stroke(); }
+function label(t, x, y, size, color = MUTED, align = 'center', font = FD, weight = 600) { ctx.font = `${weight} ${size}px ${font}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.fillText(t, x, y); }
+
+function drawHUD() {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (state.screen !== 'play' || plane.crashed) return;
+  const s = plane, e = tmp.e.setFromQuaternion(s.q, 'YXZ');
+  const pitch = e.x * DEG, roll = e.z, V = s.vel.length(), kmh = V * 3.6;
+  const fwd = tmp.fwd.set(0, 0, -1).applyQuaternion(s.q);
+  const heading = (Math.atan2(fwd.x, -fwd.z) * DEG + 360) % 360;
+  const agl = s.pos.y - GEAR_H - s.groundH;
+  const sc = clamp(W / 1000, 0.55, 1.15);
+  const safeB = 18;
+  const cy = H - 112 * sc - safeB, cx = W / 2;
+  ctx.textBaseline = 'middle';
+
+  // Авиагоризонт
+  const R = 78 * sc;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.clip();
+  ctx.translate(cx, cy); ctx.rotate(roll);
+  const ppd = R / 30, off = pitch * ppd;
+  ctx.fillStyle = '#3d7fc4'; ctx.fillRect(-R * 2, -R * 3 + off, R * 4, R * 3);
+  ctx.fillStyle = '#7a5532'; ctx.fillRect(-R * 2, off, R * 4, R * 3);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-R * 2, off); ctx.lineTo(R * 2, off); ctx.stroke();
+  ctx.lineWidth = 1.2; ctx.font = `600 ${10 * sc}px ${FM}`; ctx.fillStyle = '#fff'; ctx.textAlign = 'left';
+  for (let p = -60; p <= 60; p += 10) {
+    if (!p) continue;
+    const y = off - p * ppd, w = (p % 20 === 0 ? 26 : 14) * sc;
+    ctx.beginPath(); ctx.moveTo(-w, y); ctx.lineTo(w, y); ctx.stroke();
+    if (p % 20 === 0) ctx.fillText(Math.abs(p), w + 4, y);
+  }
+  ctx.restore();
+  ctx.strokeStyle = RULE; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+  // Шкала крена
+  ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
+  for (const b of [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60]) {
+    const a = (b - 90) / DEG, r2 = R + (b % 30 === 0 ? 10 : 6) * sc;
+    ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R); ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2); ctx.stroke();
+  }
+  const ba = -roll - Math.PI / 2;
+  ctx.fillStyle = AMBER; ctx.beginPath();
+  ctx.moveTo(cx + Math.cos(ba) * (R - 2), cy + Math.sin(ba) * (R - 2));
+  ctx.lineTo(cx + Math.cos(ba + 0.07) * (R - 14 * sc), cy + Math.sin(ba + 0.07) * (R - 14 * sc));
+  ctx.lineTo(cx + Math.cos(ba - 0.07) * (R - 14 * sc), cy + Math.sin(ba - 0.07) * (R - 14 * sc));
+  ctx.fill();
+  // Силуэт самолёта
+  ctx.strokeStyle = AMBER; ctx.lineWidth = 3.5 * sc; ctx.beginPath();
+  ctx.moveTo(cx - 44 * sc, cy); ctx.lineTo(cx - 14 * sc, cy); ctx.lineTo(cx, cy + 8 * sc); ctx.lineTo(cx + 14 * sc, cy); ctx.lineTo(cx + 44 * sc, cy); ctx.stroke();
+  ctx.fillStyle = AMBER; ctx.beginPath(); ctx.arc(cx, cy, 3 * sc, 0, Math.PI * 2); ctx.fill();
+
+  // Скорость
+  const bw = 132 * sc, bh = 86 * sc, gap = 22 * sc;
+  const sx = cx - R - gap - bw, by = cy - bh / 2;
+  box(sx, by, bw, bh);
+  label('СКОРОСТЬ', sx + bw / 2, by + 16 * sc, 11 * sc);
+  const vColor = s.stall ? ALERT : (kmh < 105 && !s.onGround ? AMBER : INK);
+  label(String(Math.round(kmh)), sx + bw / 2, by + 46 * sc, 34 * sc, vColor, 'center', FM, 600);
+  label('км/ч', sx + bw / 2, by + 72 * sc, 11 * sc, MUTED, 'center', FM, 400);
+  // Высота
+  const ax = cx + R + gap;
+  box(ax, by, bw, bh);
+  label('ВЫСОТА', ax + bw / 2, by + 16 * sc, 11 * sc);
+  label(String(Math.round(s.pos.y - GEAR_H)), ax + bw / 2, by + 46 * sc, 34 * sc, INK, 'center', FM, 600);
+  label(`м · над землёй ${Math.max(0, Math.round(agl))}`, ax + bw / 2, by + 72 * sc, 10.5 * sc, MUTED, 'center', FM, 400);
+
+  // Вариометр
+  const vr = 40 * sc, vx = ax + bw + gap + vr, vy = cy;
+  ctx.beginPath(); ctx.arc(vx, vy, vr + 6 * sc, 0, Math.PI * 2); ctx.fillStyle = GLASS; ctx.fill(); ctx.strokeStyle = RULE; ctx.lineWidth = 1; ctx.stroke();
+  ctx.strokeStyle = MUTED; ctx.lineWidth = 1.2;
+  for (let v = -10; v <= 10; v += 2.5) {
+    const a = Math.PI + v / 10 * Math.PI * 0.75, r1 = vr - (v % 5 === 0 ? 9 : 5) * sc;
+    ctx.beginPath(); ctx.moveTo(vx + Math.cos(a) * r1, vy + Math.sin(a) * r1); ctx.lineTo(vx + Math.cos(a) * vr, vy + Math.sin(a) * vr); ctx.stroke();
+  }
+  label('+5', vx + Math.cos(Math.PI * 1.375) * (vr - 18 * sc), vy + Math.sin(Math.PI * 1.375) * (vr - 18 * sc), 9 * sc, MUTED, 'center', FM, 400);
+  label('−5', vx + Math.cos(Math.PI * 0.625) * (vr - 18 * sc), vy + Math.sin(Math.PI * 0.625) * (vr - 18 * sc), 9 * sc, MUTED, 'center', FM, 400);
+  label('0', vx - vr + 16 * sc, vy, 9 * sc, MUTED, 'center', FM, 400);
+  const vsp = s.vel.y, na = Math.PI + clamp(vsp, -10, 10) / 10 * Math.PI * 0.75;
+  ctx.strokeStyle = AMBER; ctx.lineWidth = 2.5 * sc; ctx.beginPath(); ctx.moveTo(vx, vy); ctx.lineTo(vx + Math.cos(na) * (vr - 4 * sc), vy + Math.sin(na) * (vr - 4 * sc)); ctx.stroke();
+  label(`${vsp >= 0 ? '+' : '−'}${Math.abs(vsp).toFixed(1)}`, vx + 10 * sc, vy + 18 * sc, 10 * sc, INK, 'center', FM, 600);
+  label('ВАРИОМЕТР м/с', vx, vy + vr + 18 * sc, 9.5 * sc);
+
+  // Газ и закрылки
+  const tw = 26 * sc, th = 92 * sc, tx = sx - gap - tw - 30 * sc, ty = cy - th / 2;
+  box(tx - 10 * sc, ty - 10 * sc, tw + 50 * sc, th + 36 * sc);
+  rrect(tx, ty, tw, th, 4); ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fill();
+  const fh = th * s.throttle; rrect(tx, ty + th - fh, tw, Math.max(fh, 0.1), 4); ctx.fillStyle = AMBER; ctx.fill();
+  label(`${Math.round(s.throttle * 100)}%`, tx + tw + 20 * sc, ty + 10 * sc, 11 * sc, INK, 'center', FM, 600);
+  label('ГАЗ', tx + tw + 20 * sc, ty + 30 * sc, 10 * sc);
+  label(`ЗКР ${s.flaps}`, tx + tw + 20 * sc, ty + th - 6 * sc, 10 * sc, s.flaps ? AMBER : MUTED, 'center', FM, 600);
+
+  // Курс
+  const hw = Math.min(420 * sc, W - 40), hx = cx - hw / 2, hy = 14 + 0;
+  box(hx, hy, hw, 34);
+  ctx.save(); ctx.beginPath(); ctx.rect(hx, hy, hw, 34); ctx.clip();
+  const ppd2 = hw / 90;
+  for (let d = Math.floor((heading - 50) / 5) * 5; d <= heading + 50; d += 5) {
+    const x = cx + (d - heading) * ppd2, dd = ((d % 360) + 360) % 360;
+    ctx.strokeStyle = MUTED; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, hy + 34); ctx.lineTo(x, hy + 34 - (dd % 10 === 0 ? 9 : 5)); ctx.stroke();
+    if (dd % 30 === 0) {
+      const name = { 0: 'С', 90: 'В', 180: 'Ю', 270: 'З' }[dd] || String(dd / 10).padStart(2, '0');
+      label(name, x, hy + 13, 12, name.length === 1 ? AMBER : INK, 'center', FM, 600);
+    }
+  }
+  ctx.restore();
+  ctx.fillStyle = AMBER; ctx.beginPath(); ctx.moveTo(cx, hy + 26); ctx.lineTo(cx - 5, hy + 34); ctx.lineTo(cx + 5, hy + 34); ctx.fill();
+  label(`${String(Math.round(heading) % 360).padStart(3, '0')}°`, cx, hy + 48, 12, INK, 'center', FM, 600);
+
+  // Предупреждения
+  const blink = (performance.now() % 700) < 420;
+  const warn = [];
+  if (s.stall) warn.push(['СВАЛИВАНИЕ — ОТДАЙТЕ ШТУРВАЛ', ALERT]);
+  else if (!s.onGround && agl < 60 && vsp < -6) warn.push(['ВЫСОТА! ВЫВОДИТЕ', ALERT]);
+  if (s.brake && s.onGround) warn.push(['ТОРМОЗА', AMBER]);
+  warn.forEach(([t, c], i) => { if (c === AMBER || blink) label(t, cx, cy - R - 34 * sc - i * 24 * sc, 18 * sc, c, 'center', FD, 700); });
+  label(camMode === 'cockpit' ? 'КАБИНА · C' : 'СНАРУЖИ · C', cx, cy + R + 12 * sc, 9.5 * sc, MUTED);
+
+  // Подписи векторов сил
+  const names = { lift: ['Y', '#6fe3a0'], weight: ['G', '#ff5b4f'], thrust: ['P', '#ffb547'], drag: ['X', '#5cc8ff'] };
+  for (const k in forceArrows) {
+    const a = forceArrows[k];
+    if (!a.g.visible) continue;
+    const p = tmp.v.copy(a.tip).project(camera);
+    if (p.z > 1) continue;
+    const x = (p.x + 1) / 2 * W, y = (1 - p.y) / 2 * H;
+    const t = `${names[k][0]} ${(Math.abs(a.value) / 1000).toFixed(1)} кН`;
+    ctx.font = `600 13px ${FM}`;
+    const tw2 = ctx.measureText(t).width + 12;
+    rrect(x - tw2 / 2, y - 11, tw2, 22, 6); ctx.fillStyle = 'rgba(8,20,30,0.75)'; ctx.fill();
+    label(t, x, y + 1, 13, names[k][1], 'center', FM, 600);
+  }
+}
+
+// ---------- 9. Главный цикл ----------
+$('#btnFree').addEventListener('click', () => start('free'));
+$('#btnMission').addEventListener('click', () => start('mission'));
+$('#btnAgain').addEventListener('click', () => start(state.mode));
+$('#btnMenu').addEventListener('click', openMenu);
+$('#btnProject').addEventListener('click', openProject);
+$('#btnProjBack').addEventListener('click', openMenu);
+$('#btnLabFly').addEventListener('click', () => { viz.arrows = true; viz.lab = true; start('free'); toast('V — векторы сил, L — лаборатория'); });
+document.querySelectorAll('.proj-nav [data-go]').forEach(b => b.addEventListener('click', () => {
+  const t = document.getElementById(b.dataset.go);
+  if (t) t.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+}));
+// Подсветка текущего раздела в оглавлении
+$('#projBody').addEventListener('scroll', () => {
+  const body = $('#projBody'), top = body.getBoundingClientRect().top + 40;
+  let cur = 'p-intro';
+  body.querySelectorAll('section').forEach(sec => { if (sec.getBoundingClientRect().top <= top) cur = sec.id; });
+  document.querySelectorAll('.proj-nav [data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === cur));
+});
+function openProject() {
+  state.screen = 'project';
+  $('#menu').hidden = true; $('#project').hidden = false;
+  $('#projBody').focus({ preventScroll: true });
+}
+
+resize();
+resetPlane(false);
+let last = performance.now(), acc = 0;
+const STEP = 1 / 120;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (state.screen === 'play') {
+    if (!plane.crashed) {
+      updateInputs(dt);
+      acc += dt;
+      while (acc >= STEP) { physicsStep(STEP); acc -= STEP; if (plane.crashed) break; }
+      if (!plane.crashed) updateMission(dt);
+    } else if ((state.crashTimer -= dt) <= 0) showResult(true);
+  }
+  if (toastTimer > 0 && (toastTimer -= dt) <= 0) $('#toast').classList.remove('show');
+  updateParticles(dt);
+  updateVisuals(dt);
+  updateLab(dt);
+  updateCamera(dt);
+  updateAudio();
+  sky.position.copy(camera.position);
+  renderer.render(scene, camera);
+  drawHUD();
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
